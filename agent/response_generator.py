@@ -21,6 +21,30 @@ def _trim_house(h: Dict[str, Any]) -> Dict[str, Any]:
     return {k: h.get(k) for k in keys if h.get(k) is not None}
 
 
+def _format_tool_results_summary(tool_results: List[Dict[str, Any]]) -> str:
+    """把工具调用结果压成简短一句，供模型依据工具结果组织回复。"""
+    if not tool_results:
+        return ""
+    parts = []
+    for t in tool_results:
+        name = t.get("tool", "")
+        ok = t.get("ok", False)
+        if name == "get_houses_by_platform" or name == "get_houses_by_community" or name == "get_houses_nearby":
+            total = t.get("total", 0)
+            cnt = t.get("items_count", 0)
+            parts.append(f"{name}:{'成功' if ok else '失败'} 共{total}条(返回{cnt}条)")
+        elif name == "get_house":
+            hid = t.get("house_id", "")
+            parts.append(f"get_house:{'已找到' + str(hid) if hid else '未找到该房源'}")
+        elif name == "get_house_listings":
+            parts.append(f"get_house_listings:{'有挂牌数据' if ok else '无'}")
+        elif name == "rent_house":
+            parts.append(f"rent_house:{'成功' if ok else '失败'}")
+        else:
+            parts.append(f"{name}:{'成功' if ok else '失败'}")
+    return "；".join(parts)
+
+
 def generate_reply(
     user_input: str,
     slots: Slots,
@@ -33,8 +57,9 @@ def generate_reply(
     single_match: bool = False,
     rent_ok: bool = False,
     listings: Optional[Dict[str, Any]] = None,
+    tool_results: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    """Generate natural language reply; enforce keyword strategy for judge."""
+    """Generate natural language reply; 依据工具调用结果与房源数据组织回复。"""
     houses_json = json.dumps([_trim_house(h) for h in houses], ensure_ascii=False, indent=0)
     slots_json = json.dumps(slots.to_dict(), ensure_ascii=False)
 
@@ -51,12 +76,16 @@ def generate_reply(
         if slots.max_subway_dist == 800:
             hints.append("体现 800米")
 
-    system = """北京租房顾问。用自然中文回复。每套房源写清: 房源ID、小区、区、户型、面积、月租、装修、朝向、地铁站及距离、西二旗通勤。无结果要说「没有」；仅一套时说「只有这一套」或「没有其他的了，只有这一套」；租房确认以「好的」开头。回复须含所有房源ID。"""
+    system = """北京租房顾问。用自然中文回复。依据「工具调用结果」和下方「结果」数据组织回复。每套房源写清: 房源ID、小区、区、户型、面积、月租、装修、朝向、地铁站及距离、西二旗通勤。无结果要说「没有」；仅一套时说「只有这一套」或「没有其他的了，只有这一套」；租房确认以「好的」开头。回复须含所有房源ID。"""
     # 打招呼/问能力时不要给「结果0套」避免回复成「没有」
     if intent == "chat" and (_is_greeting(user_input) or _is_capability_ask(user_input)):
         user_content = f"用户说: {user_input}\n请简短问候并介绍你能做什么（北京租房顾问：可帮查区域/户型/预算/地铁/通勤等），不要说「没有」或「暂无房源」。\n回复:"
     else:
-        user_content = f"问:{user_input}\n条件:{slots_json}\n结果(共{total}套):{houses_json}"
+        tool_summary = _format_tool_results_summary(tool_results or [])
+        user_content = f"问:{user_input}\n条件:{slots_json}\n"
+        if tool_summary:
+            user_content += f"工具调用结果:{tool_summary}\n"
+        user_content += f"结果(共{total}套):{houses_json}"
         if listings:
             user_content += "\n该房源各平台挂牌:" + json.dumps(listings, ensure_ascii=False)
     if hints:

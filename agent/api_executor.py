@@ -21,11 +21,29 @@ def _get_items_from_house_result(result: Any) -> List[Dict]:
     return []
 
 
-def execute_calls(calls: List[APICall]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """Execute API call sequence; returns (house_results, extra). extra may contain listings for compare_houses."""
+def _summarize_tool_result(name: str, params: Dict[str, Any], step_result: Any) -> Dict[str, Any]:
+    """Build one entry for tool_results (判题/日志可见实际调用了哪些工具及结果)."""
+    entry: Dict[str, Any] = {"tool": name, "params": params, "ok": step_result is not None}
+    if step_result is None:
+        return entry
+    if isinstance(step_result, dict):
+        if "items" in step_result:
+            items = step_result.get("items") or []
+            entry["total"] = step_result.get("total", len(items))
+            entry["items_count"] = len(items)
+        elif "house_id" in step_result:
+            entry["house_id"] = step_result.get("house_id")
+        elif step_result.get("data"):
+            entry["result"] = "data"
+    return entry
+
+
+def execute_calls(calls: List[APICall]) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[Dict[str, Any]]]:
+    """Execute API call sequence; returns (house_results, extra, tool_results)."""
     house_results: List[Dict[str, Any]] = []
     step_results: List[Any] = []
     extra: Dict[str, Any] = {}
+    tool_results: List[Dict[str, Any]] = []
 
     for i, call in enumerate(calls):
         params = dict(call.params)
@@ -41,6 +59,7 @@ def execute_calls(calls: List[APICall]) -> Tuple[List[Dict[str, Any]], Dict[str,
                     params["landmark_id"] = lid
         step_result = _execute_one(call.name, params)
         step_results.append(step_result)
+        tool_results.append(_summarize_tool_result(call.name, params, step_result))
         items = _get_items_from_house_result(step_result)
         if items:
             house_results.extend(items)
@@ -54,7 +73,7 @@ def execute_calls(calls: List[APICall]) -> Tuple[List[Dict[str, Any]], Dict[str,
                 house_results.append(step_result["data"])
             elif isinstance(step_result, dict):
                 house_results.append(step_result)
-    return house_results, extra
+    return house_results, extra, tool_results
 
 
 def _execute_one(name: str, params: Dict[str, Any]) -> Any:

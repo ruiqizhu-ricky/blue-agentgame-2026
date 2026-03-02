@@ -30,6 +30,38 @@ def _extract_house_ids(houses: List[Dict[str, Any]]) -> List[str]:
     return ids
 
 
+def _no_match_from_tool_results(
+    tool_results: List[Dict[str, Any]],
+    house_results: List[Dict[str, Any]],
+    total: int,
+) -> bool:
+    """根据工具调用结果与聚合结果判断无匹配：总数为0且无房源；或主查询工具失败/返回0条。"""
+    if total == 0 and not house_results:
+        return True
+    # 若主查询工具（唯一或第一个）明确返回 0 或失败，以工具为准
+    for t in tool_results:
+        if not t.get("ok"):
+            return True
+        name = t.get("tool", "")
+        if name in ("get_houses_by_platform", "get_houses_by_community", "get_houses_nearby"):
+            if t.get("total", 0) == 0 and t.get("items_count", 0) == 0:
+                return True
+            break
+        if name == "get_house":
+            if not t.get("house_id"):
+                return True
+            break
+    return False
+
+
+def _rent_ok_from_tool_results(tool_results: List[Dict[str, Any]]) -> bool:
+    """根据工具调用结果判断租赁是否成功。"""
+    for t in tool_results:
+        if t.get("tool") == "rent_house" and t.get("ok"):
+            return True
+    return False
+
+
 def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, Any]:
     """Process one user turn; return { session_id, message, houses }.
     When model_ip is set (from contest /api/v1/chat), LLM is called at http://model_ip:8888 with Session-ID.
@@ -67,10 +99,10 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     if intent == Intent.CHAT:
         message = generate_reply(user_input, Slots(), [], 0, history, intent="chat")
         append_turn(session_id, user_input, message, intent=intent.value, result_house_ids=[])
-        return {"session_id": session_id, "message": message, "houses": []}
+        return {"session_id": session_id, "message": message, "houses": [], "tool_results": []}
 
     calls = plan_calls(intent, slots)
-    house_results, extra = execute_calls(calls) if calls else ([], {})
+    house_results, extra, tool_results = execute_calls(calls) if calls else ([], {}, [])
 
     # Sort params for post_process (from slots)
     sort_by = slots.sort_by
@@ -91,9 +123,9 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     if intent == Intent.FOLLOW_UP:
         set_accumulated_filters(session_id, slots)
 
-    no_match = total == 0 and not house_results
-    rent_ok = intent == Intent.RENT_HOUSE and (slots.house_id and (calls or processed))
-    # Only use "没有其他的了，只有这一套" when user asked for more and there is exactly one result
+    # 用工具调用结果做判断：无结果 / 租赁成功 以 tool_results 为准
+    no_match = _no_match_from_tool_results(tool_results, house_results, total)
+    rent_ok = intent == Intent.RENT_HOUSE and slots.house_id and _rent_ok_from_tool_results(tool_results)
     ask_more = "其他" in user_input or "都给" in user_input
     single_match_phrase = total == 1 and ask_more and intent == Intent.FOLLOW_UP
 
@@ -108,6 +140,7 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
         single_match=single_match_phrase,
         rent_ok=rent_ok,
         listings=extra.get("listings"),
+        tool_results=tool_results,
     )
 
     house_ids = _extract_house_ids(processed)
@@ -123,7 +156,7 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
         result_house_ids=house_ids,
     )
 
-    return {"session_id": session_id, "message": message, "houses": house_ids}
+    return {"session_id": session_id, "message": message, "houses": house_ids, "tool_results": tool_results}
 
 
 def run_app():

@@ -83,7 +83,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             "session_id": session_id,
             "response": response,
             "status": "success",
-            "tool_results": [],
+            "tool_results": out.get("tool_results", []),
             "timestamp": int(t0),
             "duration_ms": duration_ms,
         }
