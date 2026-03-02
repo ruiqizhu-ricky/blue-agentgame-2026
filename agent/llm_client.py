@@ -1,15 +1,19 @@
 """
 LLM client: OpenAI-compatible API or mock for testing.
-Set LLM_API_BASE (and optionally LLM_API_KEY) to use real API.
+Per-request model_ip (from /api/v1/chat) uses context; else config.LLM_API_BASE.
 """
 import json
-import os
 import re
+from contextvars import ContextVar
 from typing import Any, Dict, List
 
 import requests
 
 from . import config
+
+# Request-scoped: set by server when model_ip is provided (contest judge)
+_llm_api_base_ctx: ContextVar[str] = ContextVar("llm_api_base", default="")
+_session_id_ctx: ContextVar[str] = ContextVar("session_id", default="")
 
 # Mock responses for open test cases (so we can run pipeline without real LLM)
 MOCK_INTENT_RESPONSES = {
@@ -46,22 +50,40 @@ MOCK_INTENT_RESPONSES = {
 }
 
 
+def set_request_llm(model_ip: str, session_id: str = "") -> None:
+    """Set request-scoped LLM base (http://model_ip:8888) and session_id for Session-ID header."""
+    base = f"http://{model_ip.strip()}:8888" if model_ip else ""
+    _llm_api_base_ctx.set(base)
+    _session_id_ctx.set(session_id or "")
+
+
+def clear_request_llm() -> None:
+    """Clear request-scoped LLM context."""
+    try:
+        _llm_api_base_ctx.set("")
+        _session_id_ctx.set("")
+    except LookupError:
+        pass
+
+
 def call_llm(messages: List[Dict[str, str]], *, temperature: float = 0.2) -> str:
-    """Call LLM and return the assistant content. Uses LLM_API_BASE if set, else mock."""
-    if config.LLM_API_BASE:
-        return _call_api(messages, temperature=temperature)
+    """Call LLM and return the assistant content. Uses request context or config.LLM_API_BASE."""
+    base = _llm_api_base_ctx.get() or config.LLM_API_BASE
+    if base:
+        return _call_api(messages, api_base=base, temperature=temperature)
     return ""
 
 
-def _call_api(messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
-    url = config.LLM_API_BASE.rstrip("/")
-    if "/chat" not in url and "/v1" not in url:
+def _call_api(messages: List[Dict[str, str]], api_base: str, temperature: float = 0.2) -> str:
+    url = api_base.rstrip("/")
+    if "/chat/completions" not in url:
         url = f"{url}/v1/chat/completions"
-    elif "/chat/completions" not in url:
-        url = f"{url}/chat/completions" if url.endswith("/v1") else f"{url}/v1/chat/completions"
     headers = {"Content-Type": "application/json"}
     if config.LLM_API_KEY:
         headers["Authorization"] = f"Bearer {config.LLM_API_KEY}"
+    session_id = _session_id_ctx.get()
+    if session_id:
+        headers["Session-ID"] = session_id
     body = {
         "model": config.LLM_MODEL,
         "messages": messages,

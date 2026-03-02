@@ -40,20 +40,34 @@ python -m agent.main <session_id> "<user_input>"
 
 ## HTTP 服务
 
-启动本地 HTTP 服务（端口见 `config.json` 的 `server_port`，默认 8000）：
+启动本地 HTTP 服务（端口见 `config.json` 的 `server_port`，默认 8000）。启动后将监听端口配置到大赛平台 Agent 配置中。
 
 ```bash
 python -m agent.server
 ```
 
-- **GET /** 或 **GET /health**：健康检查，返回 `{"status":"ok","service":"rental-agent"}`
-- **POST /**：请求体 JSON `{"session_id": "...", "user_input": "..."}`，返回 `{"session_id", "message", "houses"}`
+### 大赛对话接口（Agent API）
+
+**POST /api/v1/chat**（Content-Type: application/json）
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| model_ip | string | 是 | 模型资源 IP，端口固定 8888，用于本 Agent 调用模型 |
+| session_id | string | 是 | 会话 ID，多轮用例同一 session_id 需做上下文管理 |
+| message | string | 是 | 用户消息 |
+
+响应：`session_id`、`response`（普通对话为自然语言文本；房源查询/租赁后为 JSON 字符串 `{"message":"...","houses":["HF_xxx",...]}`）、`status`、`tool_results`、`timestamp`、`duration_ms`。
 
 示例：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/ -H "Content-Type: application/json" -d "{\"session_id\":\"EV-45\",\"user_input\":\"海淀区离地铁近的两居有吗？\"}"
+curl -X POST http://localhost:8000/api/v1/chat -H "Content-Type: application/json" -d "{\"model_ip\":\"xxx.xxx.xx.x\",\"session_id\":\"abc123\",\"message\":\"查询海淀区的房源\"}"
 ```
+
+### 其他
+
+- **GET /** 或 **GET /health**：健康检查
+- **POST /**（兼容）：请求体 `{"session_id","user_input"}` 或带 `model_ip`，返回 `{"session_id","message","houses"}`
 
 ## 测试
 

@@ -7,6 +7,7 @@ from . import config
 from .api_executor import execute_calls
 from .api_planner import plan_calls, resolve_reference, slots_to_by_platform_params
 from .intent_parser import merge_slots, parse_intent
+from .llm_client import clear_request_llm, set_request_llm
 from .models import Intent, Slots
 from .post_processor import process as post_process
 from .response_generator import generate_reply
@@ -29,8 +30,20 @@ def _extract_house_ids(houses: List[Dict[str, Any]]) -> List[str]:
     return ids
 
 
-def handle(session_id: str, user_input: str) -> Dict[str, Any]:
-    """Process one user turn; return { session_id, message, houses }."""
+def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, Any]:
+    """Process one user turn; return { session_id, message, houses }.
+    When model_ip is set (from contest /api/v1/chat), LLM is called at http://model_ip:8888 with Session-ID.
+    """
+    if model_ip:
+        set_request_llm(model_ip, session_id)
+    try:
+        return _handle_impl(session_id, user_input)
+    finally:
+        if model_ip:
+            clear_request_llm()
+
+
+def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     state = ensure_session(session_id)
     history = get_history_for_prompt(session_id)
     last_result_ids = _extract_house_ids(state.last_results)
