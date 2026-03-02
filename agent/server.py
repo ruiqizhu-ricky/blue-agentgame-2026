@@ -26,6 +26,17 @@ def _log_request(method: str, path: str, body: str = "", client: str = ""):
             logger.info("Body(raw): %s", body[:500])
 
 
+def _log_response(code: int, obj):
+    """Log response body (reply) sent to client."""
+    try:
+        msg = json.dumps(obj, ensure_ascii=False) if isinstance(obj, (dict, list)) else str(obj)
+        if len(msg) > 800:
+            msg = msg[:800] + "..."
+        logger.info("Response: %s %s", code, msg)
+    except Exception:
+        logger.info("Response: %s (serialize failed)", code)
+
+
 class AgentHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/v1/chat":
@@ -110,6 +121,7 @@ class AgentHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def _send(self, code, obj):
+        _log_response(code, obj)
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
