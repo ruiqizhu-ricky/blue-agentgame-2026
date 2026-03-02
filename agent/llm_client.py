@@ -66,15 +66,15 @@ def clear_request_llm() -> None:
         pass
 
 
-def call_llm(messages: List[Dict[str, str]], *, temperature: float = 0.2) -> str:
+def call_llm(messages: List[Dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 1024) -> str:
     """Call LLM and return the assistant content. Uses request context or config.LLM_API_BASE."""
     base = _llm_api_base_ctx.get() or config.LLM_API_BASE
     if base:
-        return _call_api(messages, api_base=base, temperature=temperature)
+        return _call_api(messages, api_base=base, temperature=temperature, max_tokens=max_tokens)
     return ""
 
 
-def _call_api(messages: List[Dict[str, str]], api_base: str, temperature: float = 0.2) -> str:
+def _call_api(messages: List[Dict[str, str]], api_base: str, temperature: float = 0.2, max_tokens: int = 1024) -> str:
     url = api_base.rstrip("/")
     if "/chat/completions" not in url:
         url = f"{url}/v1/chat/completions"
@@ -88,7 +88,7 @@ def _call_api(messages: List[Dict[str, str]], api_base: str, temperature: float 
         "model": config.LLM_MODEL,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": 2048,
+        "max_tokens": max_tokens,
     }
     try:
         r = requests.post(url, json=body, headers=headers, timeout=60)

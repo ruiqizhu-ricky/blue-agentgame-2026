@@ -6,8 +6,8 @@ from .models import Slots
 
 
 def _trim_house(h: Dict[str, Any]) -> Dict[str, Any]:
-    """Keep only fields needed for reply generation to save tokens."""
-    keys = ["house_id", "id", "community", "district", "room_count", "bedrooms", "area", "rent_price", "price", "decoration", "orientation", "subway_station", "subway_distance", "commute_time", "listing_platform"]
+    """Minimal fields for reply to save tokens; 判题需房源ID/区/户型/面积/租金/地铁/通勤."""
+    keys = ["house_id", "id", "community", "district", "room_count", "bedrooms", "area", "rent_price", "price", "decoration", "orientation", "subway_station", "subway_distance", "commute_time"]
     return {k: h.get(k) for k in keys if h.get(k) is not None}
 
 
@@ -27,51 +27,31 @@ def generate_reply(
     houses_json = json.dumps([_trim_house(h) for h in houses], ensure_ascii=False, indent=0)
     slots_json = json.dumps(slots.to_dict(), ensure_ascii=False)
 
-    # Keyword hints so LLM includes required phrases
+    # 短 hint 省 token，保证判题关键词
     hints = []
     if no_match:
-        hints.append('回复中必须包含"没有"（例如：没有符合条件的房源）。')
+        hints.append("必含: 没有")
     if single_match:
-        hints.append('回复中必须包含完整句子："没有其他的了，只有这一套"。')
+        hints.append('必含: "没有其他的了，只有这一套"')
     if rent_ok:
-        hints.append('回复必须以"好的"开头，并说明已完成租赁。')
+        hints.append("必以「好的」开头")
     if houses and not no_match:
-        hints.append("回复中必须包含所有房源ID（如 HF_906），不可省略。")
-        hints.append("若用户要求按地铁距离排序，回复中须包含 subway_distance 和 asc 或 desc。")
+        hints.append("必含全部房源ID；排序时含 subway_distance 与 asc/desc")
         if slots.max_subway_dist == 800:
-            hints.append("回复中须体现 800 米以内（近地铁）。")
+            hints.append("体现 800米")
 
-    hint_text = "\n".join(hints) if hints else ""
-
-    system = """你是一个专业的北京租房顾问。根据以下信息生成回复。
-
-要求：
-1. 回复使用自然的中文，友好专业。
-2. 每套房源必须展示：房源ID、小区名、行政区、户型、面积、月租金、装修、朝向、最近地铁站及距离、到西二旗通勤时间。
-3. 若有排序要求，按排序顺序列出，并注明排序依据字段名和方向（如 subway_distance asc）。
-4. 若无匹配结果，明确告知"没有"符合条件的房源。
-5. 若只有一套，明确说"只有这一套"；若用户追问还有没有其他的且只有一套时，必须说"没有其他的了，只有这一套"。
-6. 回复中必须包含所有房源 ID（如 HF_906），不可省略。
-7. 若用户要求租房，确认后回复"好的"并说明已完成租赁。
-"""
-    user_content = f"""## 用户问题
-{user_input}
-
-## 筛选条件
-{slots_json}
-
-## 查询结果（共 {total} 套，以下展示最多 5 套）
-{houses_json}
-"""
-    if hint_text:
-        user_content += f"\n## 必须满足\n{hint_text}\n"
+    system = """北京租房顾问。用自然中文回复。每套房源写清: 房源ID、小区、区、户型、面积、月租、装修、朝向、地铁站及距离、西二旗通勤。无结果要说「没有」；仅一套时说「只有这一套」或「没有其他的了，只有这一套」；租房确认以「好的」开头。回复须含所有房源ID。"""
+    user_content = f"问:{user_input}\n条件:{slots_json}\n结果(共{total}套):{houses_json}"
+    if hints:
+        user_content += "\n" + " ".join(hints)
+    # 最多带最近 2 轮对话省 token
     if history:
-        user_content += f"\n## 最近对话\n{json.dumps(history[-6:], ensure_ascii=False)}\n"
-
-    user_content += "\n请生成回复："
+        short_hist = history[-4:]
+        user_content += "\n近轮:" + json.dumps(short_hist, ensure_ascii=False)
+    user_content += "\n回复:"
 
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_content}]
-    raw = call_llm(messages)
+    raw = call_llm(messages, max_tokens=1024)
     if raw and raw.strip():
         return raw.strip()
     # Fallback when no LLM

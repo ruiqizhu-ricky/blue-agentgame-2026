@@ -45,7 +45,8 @@ def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, An
 
 def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     state = ensure_session(session_id)
-    history = get_history_for_prompt(session_id)
+    # 仅取最近 3 轮供 prompt，省 token
+    history = get_history_for_prompt(session_id, max_turns=3)
     last_result_ids = _extract_house_ids(state.last_results)
 
     intent, slots, ref_to_last, ref_index = parse_intent(user_input, history, last_result_ids)
