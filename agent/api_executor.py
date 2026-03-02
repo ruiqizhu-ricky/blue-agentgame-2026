@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .api_client import LandmarkAPI, HouseAPI
 from .models import APICall
@@ -21,10 +21,11 @@ def _get_items_from_house_result(result: Any) -> List[Dict]:
     return []
 
 
-def execute_calls(calls: List[APICall]) -> List[Dict[str, Any]]:
-    """Execute API call sequence; resolve depends_on from previous results. Returns list of house dicts (for query intents)."""
+def execute_calls(calls: List[APICall]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Execute API call sequence; returns (house_results, extra). extra may contain listings for compare_houses."""
     house_results: List[Dict[str, Any]] = []
     step_results: List[Any] = []
+    extra: Dict[str, Any] = {}
 
     for i, call in enumerate(calls):
         params = dict(call.params)
@@ -46,12 +47,14 @@ def execute_calls(calls: List[APICall]) -> List[Dict[str, Any]]:
         # Single house (get_house) or action result
         if call.name == "get_house" and step_result and isinstance(step_result, dict) and "house_id" in step_result:
             house_results.append(step_result)
+        if call.name == "get_house_listings" and step_result and isinstance(step_result, dict):
+            extra["listings"] = step_result
         if call.name in ("rent_house", "terminate_house", "offline_house") and step_result:
             if isinstance(step_result, dict) and step_result.get("data"):
                 house_results.append(step_result["data"])
             elif isinstance(step_result, dict):
                 house_results.append(step_result)
-    return house_results
+    return house_results, extra
 
 
 def _execute_one(name: str, params: Dict[str, Any]) -> Any:
@@ -110,6 +113,9 @@ def _execute_one(name: str, params: Dict[str, Any]) -> Any:
         return out
     if name == "get_house":
         out = _house.get_house(params.get("house_id", ""))
+        return out
+    if name == "get_house_listings":
+        out = _house.get_house_listings(params.get("house_id", ""))
         return out
     if name == "rent_house":
         ok, out = _house.rent_house(

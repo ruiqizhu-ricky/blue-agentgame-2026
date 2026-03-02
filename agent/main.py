@@ -70,7 +70,7 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
         return {"session_id": session_id, "message": message, "houses": []}
 
     calls = plan_calls(intent, slots)
-    house_results = execute_calls(calls) if calls else []
+    house_results, extra = execute_calls(calls) if calls else ([], {})
 
     # Sort params for post_process (from slots)
     sort_by = slots.sort_by
@@ -107,6 +107,7 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
         no_match=no_match,
         single_match=single_match_phrase,
         rent_ok=rent_ok,
+        listings=extra.get("listings"),
     )
 
     house_ids = _extract_house_ids(processed)

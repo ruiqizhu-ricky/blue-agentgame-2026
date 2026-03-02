@@ -5,6 +5,16 @@ from .llm_client import call_llm
 from .models import Slots
 
 
+def _is_greeting(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(t in ("你好", "您好", "嗨") or t.startswith("你好") or t.startswith("您好") or "你好呀" in t or "嗨" == t[:1])
+
+
+def _is_capability_ask(text: str) -> bool:
+    t = (text or "").strip()
+    return "可以做什么" in t or "能做什么" in t or "有什么功能" in t or "你能" in t and "吗" in t
+
+
 def _trim_house(h: Dict[str, Any]) -> Dict[str, Any]:
     """Minimal fields for reply to save tokens; 判题需房源ID/区/户型/面积/租金/地铁/通勤."""
     keys = ["house_id", "id", "community", "district", "room_count", "bedrooms", "area", "rent_price", "price", "decoration", "orientation", "subway_station", "subway_distance", "commute_time"]
@@ -22,6 +32,7 @@ def generate_reply(
     no_match: bool = False,
     single_match: bool = False,
     rent_ok: bool = False,
+    listings: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generate natural language reply; enforce keyword strategy for judge."""
     houses_json = json.dumps([_trim_house(h) for h in houses], ensure_ascii=False, indent=0)
@@ -41,7 +52,13 @@ def generate_reply(
             hints.append("体现 800米")
 
     system = """北京租房顾问。用自然中文回复。每套房源写清: 房源ID、小区、区、户型、面积、月租、装修、朝向、地铁站及距离、西二旗通勤。无结果要说「没有」；仅一套时说「只有这一套」或「没有其他的了，只有这一套」；租房确认以「好的」开头。回复须含所有房源ID。"""
-    user_content = f"问:{user_input}\n条件:{slots_json}\n结果(共{total}套):{houses_json}"
+    # 打招呼/问能力时不要给「结果0套」避免回复成「没有」
+    if intent == "chat" and (_is_greeting(user_input) or _is_capability_ask(user_input)):
+        user_content = f"用户说: {user_input}\n请简短问候并介绍你能做什么（北京租房顾问：可帮查区域/户型/预算/地铁/通勤等），不要说「没有」或「暂无房源」。\n回复:"
+    else:
+        user_content = f"问:{user_input}\n条件:{slots_json}\n结果(共{total}套):{houses_json}"
+        if listings:
+            user_content += "\n该房源各平台挂牌:" + json.dumps(listings, ensure_ascii=False)
     if hints:
         user_content += "\n" + " ".join(hints)
     # 最多带最近 2 轮对话省 token

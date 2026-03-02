@@ -109,6 +109,10 @@ def plan_calls(intent: Intent, slots: Slots) -> List[APICall]:
         return []
 
     if intent == Intent.QUERY_HOUSE or intent == Intent.FOLLOW_UP:
+        # 追问某套房详情（如 HF_6离地铁多远）时直接查该套
+        if slots.house_id:
+            calls.append(APICall("get_house", {"house_id": slots.house_id}))
+            return calls
         if slots.landmark_name:
             calls.append(APICall("get_landmark_by_name", {"name": slots.landmark_name}))
             nearby_params = {"max_distance": 2000}
@@ -124,7 +128,7 @@ def plan_calls(intent: Intent, slots: Slots) -> List[APICall]:
             return calls
         params = slots_to_by_platform_params(slots)
         params.setdefault("page", 1)
-        params.setdefault("page_size", 10)
+        params.setdefault("page_size", 50)
         calls.append(APICall("get_houses_by_platform", params))
         return calls
 
@@ -144,6 +148,7 @@ def plan_calls(intent: Intent, slots: Slots) -> List[APICall]:
 
     if intent == Intent.COMPARE_HOUSES and slots.house_id:
         calls.append(APICall("get_house", {"house_id": slots.house_id}))
+        calls.append(APICall("get_house_listings", {"house_id": slots.house_id}))
         return calls
 
     if intent == Intent.RENT_HOUSE and slots.house_id:
