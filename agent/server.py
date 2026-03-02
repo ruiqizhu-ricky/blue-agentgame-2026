@@ -56,6 +56,5 @@ def run(port=8000):
 
 
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 8000))
-    run(port)
+    from agent import config
+    run(config.SERVER_PORT)

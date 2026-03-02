@@ -7,12 +7,24 @@
 - Python 3.8+
 - `pip install -r requirements.txt`
 
-## 配置（环境变量）
+## 配置
 
-- `SIMULATION_HOST`：租房仿真服务 IP（默认 127.0.0.1）
-- `SIMULATION_PORT`：端口（默认 8080）
-- `USER_ID`：用户工号（X-User-ID，比赛平台注册）
-- `LLM_API_BASE`：可选，LLM 接口地址（OpenAI 兼容）；不设则使用内置 mock 意图/回复
+所有配置统一放在项目根目录的 **`config.json`** 中，环境变量可覆盖同名项。
+
+| 字段 | 说明 | 默认 |
+|------|------|------|
+| `simulation_host` | 租房仿真服务 IP | 127.0.0.1 |
+| `simulation_port` | 仿真服务端口 | 8080 |
+| `user_id` | 用户工号（X-User-ID，比赛平台注册） | test_user |
+| `api_timeout` | 单次 API 超时（秒） | 5 |
+| `max_houses` | 最多返回房源数 | 5 |
+| `max_history_turns` | 对话历史保留轮数 | 6 |
+| `llm_api_base` | LLM 接口地址（OpenAI 兼容）；空则用内置 mock | "" |
+| `llm_api_key` | LLM 鉴权 Key（可选） | "" |
+| `llm_model` | 模型名 | qwen3-32b |
+| `server_port` | HTTP 服务端口 | 8000 |
+
+环境变量覆盖（与上表对应）：`SIMULATION_HOST`、`SIMULATION_PORT`、`USER_ID`、`LLM_API_BASE`、`LLM_API_KEY`、`LLM_MODEL`、`PORT`。
 
 ## 使用
 
@@ -28,7 +40,7 @@ python -m agent.main <session_id> "<user_input>"
 
 ## HTTP 服务
 
-启动本地 HTTP 服务（默认端口 8000，可通过环境变量 `PORT` 修改）：
+启动本地 HTTP 服务（端口见 `config.json` 的 `server_port`，默认 8000）：
 
 ```bash
 python -m agent.server
@@ -66,4 +78,5 @@ curl -X POST http://127.0.0.1:8000/ -H "Content-Type: application/json" -d "{\"s
 - `agent/post_processor.py`：过滤、排序、截断
 - `agent/response_generator.py`：自然语言回复生成
 - `agent/llm_client.py`：LLM 调用（可接判题器接口）
-- `agent/config.py`、`agent/models.py`：配置与数据模型
+- `agent/config.py`、`agent/models.py`：配置与数据模型  
+- 项目根目录 **`config.json`**：统一配置文件（仿真服务、LLM、HTTP 端口等）

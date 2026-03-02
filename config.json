@@ -1,0 +1,12 @@
+{
+  "simulation_host": "127.0.0.1",
+  "simulation_port": 8080,
+  "user_id": "test_user",
+  "api_timeout": 5,
+  "max_houses": 5,
+  "max_history_turns": 6,
+  "llm_api_base": "",
+  "llm_api_key": "",
+  "llm_model": "qwen3-32b",
+  "server_port": 8000
+}

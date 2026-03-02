@@ -63,7 +63,7 @@ def _call_api(messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
     if config.LLM_API_KEY:
         headers["Authorization"] = f"Bearer {config.LLM_API_KEY}"
     body = {
-        "model": os.environ.get("LLM_MODEL", "qwen3-32b"),
+        "model": config.LLM_MODEL,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": 2048,
