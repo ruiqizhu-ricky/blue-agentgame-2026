@@ -47,9 +47,13 @@ def slots_to_by_platform_params(slots: Slots) -> Dict[str, Any]:
         params["orientation"] = slots.orientation
     if slots.has_elevator is not None:
         params["elevator"] = "true" if slots.has_elevator else "false"
-    msd = _safe_int(slots.max_subway_dist, 800)
-    if msd is not None:
-        params["max_subway_dist"] = msd
+    # 仅用户明确要求「近地铁」或填了 max_subway_dist 时才加，避免无谓过滤导致 0 结果
+    if slots.max_subway_dist is not None:
+        msd = _safe_int(slots.max_subway_dist, 800)
+        if msd is not None:
+            params["max_subway_dist"] = msd
+    elif slots.near_subway:
+        params["max_subway_dist"] = 800
     mct = _safe_int(slots.max_commute_time)
     if mct is not None:
         params["commute_to_xierqi_max"] = mct
@@ -63,8 +67,6 @@ def slots_to_by_platform_params(slots: Slots) -> Dict[str, Any]:
         params["sort_order"] = slots.sort_order
     if slots.move_in_date:
         params["available_from_before"] = slots.move_in_date
-    if slots.near_subway and "max_subway_dist" not in params:
-        params["max_subway_dist"] = 800
     return params
 
 
