@@ -12,12 +12,12 @@ def _is_greeting(text: str) -> bool:
 
 def _is_capability_ask(text: str) -> bool:
     t = (text or "").strip()
-    return "可以做什么" in t or "能做什么" in t or "有什么功能" in t or "你能" in t and "吗" in t
+    return ("可以做什么" in t or "能做什么" in t or "有什么功能" in t or ("你能" in t and "吗" in t))
 
 
 def _trim_house(h: Dict[str, Any]) -> Dict[str, Any]:
     """Minimal fields for reply to save tokens; 判题需房源ID/区/户型/面积/租金/地铁/通勤."""
-    keys = ["house_id", "id", "community", "district", "room_count", "bedrooms", "area", "rent_price", "price", "decoration", "orientation", "subway_station", "subway_distance", "commute_time"]
+    keys = ["house_id", "id", "community", "district", "room_count", "bedrooms", "area", "rent_price", "price", "decoration", "orientation", "subway_station", "subway_distance", "commute_time", "elevator", "has_elevator", "rental_type", "listing_platform", "available_date", "tags", "floor", "total_floor", "facing_street"]
     return {k: h.get(k) for k in keys if h.get(k) is not None}
 
 

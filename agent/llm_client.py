@@ -107,9 +107,6 @@ def parse_intent_response(raw: str, user_input: str) -> Dict[str, Any]:
     """Parse LLM JSON output for intent/slots. Fallback to mock for known inputs."""
     if not raw or not raw.strip():
         return MOCK_INTENT_RESPONSES.get(user_input.strip(), {"intent": "chat", "slots": {}, "reference_to_last_result": False, "reference_index": None})
-    # Try mock first for exact match (testing without LLM)
-    if user_input.strip() in MOCK_INTENT_RESPONSES:
-        return MOCK_INTENT_RESPONSES[user_input.strip()].copy()
     # Extract JSON from raw (may be wrapped in markdown)
     text = raw.strip()
     m = re.search(r"\{[\s\S]*\}", text)

@@ -136,7 +136,7 @@ def parse_intent(
     last_result_ids: List[str],
 ) -> Tuple[Intent, Slots, bool, Optional[int]]:
     """Returns (intent, slots, reference_to_last_result, reference_index). 仅带最近2轮上下文以省 token."""
-    if history and last_result_ids is not None:
+    if history:
         # 最多 2 轮摘要，省 token
         summary_parts = []
         for m in history[-4:]:

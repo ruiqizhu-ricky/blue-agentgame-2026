@@ -82,14 +82,16 @@ def resolve_reference(
         h = last_results[reference_index]
         return h.get("house_id") or h.get("id")
     text = user_input.strip()
-    if "第一" in text or "第1" in text:
+    if ("第一" in text or "第1" in text) and len(last_results) >= 1:
         h = last_results[0]
         return h.get("house_id") or h.get("id")
-    if "第二" in text or "第2" in text and len(last_results) >= 2:
+    if ("第二" in text or "第2" in text) and len(last_results) >= 2:
         h = last_results[1]
         return h.get("house_id") or h.get("id")
+    if ("第三" in text or "第3" in text) and len(last_results) >= 3:
+        h = last_results[2]
+        return h.get("house_id") or h.get("id")
     if "最近" in text or "最近的那套" in text:
-        # Assume last_results already sorted by subway_distance asc
         h = last_results[0]
         return h.get("house_id") or h.get("id")
     if "最便宜" in text:
@@ -97,7 +99,11 @@ def resolve_reference(
         if sorted_by_price:
             h = sorted_by_price[0]
             return h.get("house_id") or h.get("id")
-    if "这套" in text or "这个" in text and len(last_results) == 1:
+    if "便宜" in text and "那套" in text:
+        sorted_by_price = sorted(last_results, key=lambda x: x.get("rent_price", x.get("price", 999999)))
+        if sorted_by_price:
+            return sorted_by_price[0].get("house_id") or sorted_by_price[0].get("id")
+    if "这套" in text or "这个" in text:
         h = last_results[0]
         return h.get("house_id") or h.get("id")
     return last_results[0].get("house_id") or last_results[0].get("id")

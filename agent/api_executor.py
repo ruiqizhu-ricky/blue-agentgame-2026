@@ -31,8 +31,8 @@ def _summarize_tool_result(name: str, params: Dict[str, Any], step_result: Any) 
             items = step_result.get("items") or []
             entry["total"] = step_result.get("total", len(items))
             entry["items_count"] = len(items)
-        elif "house_id" in step_result:
-            entry["house_id"] = step_result.get("house_id")
+        elif "house_id" in step_result or "id" in step_result:
+            entry["house_id"] = step_result.get("house_id") or step_result.get("id")
         elif step_result.get("data"):
             entry["result"] = "data"
     return entry
@@ -64,7 +64,7 @@ def execute_calls(calls: List[APICall]) -> Tuple[List[Dict[str, Any]], Dict[str,
         if items:
             house_results.extend(items)
         # Single house (get_house) or action result
-        if call.name == "get_house" and step_result and isinstance(step_result, dict) and "house_id" in step_result:
+        if call.name == "get_house" and step_result and isinstance(step_result, dict) and ("house_id" in step_result or "id" in step_result):
             house_results.append(step_result)
         if call.name == "get_house_listings" and step_result and isinstance(step_result, dict):
             extra["listings"] = step_result
