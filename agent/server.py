@@ -1,5 +1,6 @@
 """Minimal HTTP server for the agent. POST / with JSON { session_id, user_input }."""
 import json
+import logging
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -8,6 +9,20 @@ if __name__ == "__main__":
     sys.path.insert(0, sys.path[0] or ".")
 
 from agent.main import handle
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def _log_request(method: str, path: str, body: str = "", client: str = ""):
+    """Log incoming request info."""
+    logger.info("Request: %s %s client=%s", method, path or "/", client)
+    if body and body.strip():
+        try:
+            req = json.loads(body)
+            logger.info("Body: %s", json.dumps(req, ensure_ascii=False))
+        except Exception:
+            logger.info("Body(raw): %s", body[:500])
 
 
 class AgentHandler(BaseHTTPRequestHandler):
@@ -18,8 +33,10 @@ class AgentHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length).decode("utf-8")
+            _log_request("POST", self.path, body, str(self.client_address))
             req = json.loads(body) if body else {}
         except Exception as e:
+            logger.exception("Parse request failed")
             self._send(400, {"error": str(e)})
             return
         session_id = req.get("session_id", "").strip()
@@ -31,9 +48,11 @@ class AgentHandler(BaseHTTPRequestHandler):
             out = handle(session_id, user_input)
             self._send(200, out)
         except Exception as e:
+            logger.exception("Handle failed")
             self._send(500, {"error": str(e)})
 
     def do_GET(self):
+        _log_request("GET", self.path, client=str(self.client_address))
         if self.path in ("/", "", "/health"):
             self._send(200, {"status": "ok", "service": "rental-agent"})
             return
