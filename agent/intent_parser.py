@@ -23,6 +23,52 @@ def merge_slots(accumulated: Optional[Slots], new: Slots) -> Slots:
     return merged
 
 
+def normalize_slots(slots: Slots) -> Slots:
+    """LLM 可能返回字符串类型的数字或「地铁」等，统一为正确类型避免 API 层 ValueError。"""
+    d = slots.to_dict()
+    # max_subway_dist: "地铁"/"近地铁" -> 800, "地铁可达" -> 1000, 数字 -> int
+    v = d.get("max_subway_dist")
+    if v is not None:
+        if isinstance(v, int):
+            pass
+        elif isinstance(v, str):
+            v = v.strip()
+            if "可达" in v or v == "1000":
+                d["max_subway_dist"] = 1000
+            elif "近" in v or "地铁" in v or v == "800":
+                d["max_subway_dist"] = 800
+            else:
+                try:
+                    d["max_subway_dist"] = int(float(v))
+                except (ValueError, TypeError):
+                    d["max_subway_dist"] = 800
+        else:
+            try:
+                d["max_subway_dist"] = int(v)
+            except (ValueError, TypeError):
+                d["max_subway_dist"] = 800
+    # room_count, rent_min, rent_max, area_min, area_max, max_commute_time 转为数字
+    for key, target_type in [
+        ("room_count", int),
+        ("rent_min", float),
+        ("rent_max", float),
+        ("area_min", float),
+        ("area_max", float),
+        ("max_commute_time", int),
+    ]:
+        v = d.get(key)
+        if v is None:
+            continue
+        try:
+            if target_type is int:
+                d[key] = int(float(v)) if v != "" else None
+            else:
+                d[key] = target_type(v)
+        except (ValueError, TypeError):
+            d[key] = None
+    return Slots.from_dict(d)
+
+
 def validate_slots(slots: Slots) -> List[str]:
     errors = []
     if slots.district and slots.district not in VALID_DISTRICTS:
@@ -92,6 +138,7 @@ def parse_intent(
         intent = Intent.CHAT
     slots_dict = parsed.get("slots") or {}
     slots = Slots.from_dict(slots_dict)
+    slots = normalize_slots(slots)
     ref = parsed.get("reference_to_last_result", False)
     ref_idx = parsed.get("reference_index")
     if ref_idx is not None and not isinstance(ref_idx, int):

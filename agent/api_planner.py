@@ -13,31 +13,46 @@ SORT_BY_API = {
 }
 
 
+def _safe_int(val: Any, default: Optional[int] = None) -> Optional[int]:
+    """Coerce to int; invalid values (e.g. '地铁') return default."""
+    if val is None:
+        return default
+    if isinstance(val, int):
+        return val
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+
 def slots_to_by_platform_params(slots: Slots) -> Dict[str, Any]:
     """Convert Slots to GET /api/houses/by_platform query params."""
     params: Dict[str, Any] = {}
     if slots.district:
         params["district"] = slots.district
-    if slots.room_count is not None:
-        params["bedrooms"] = str(slots.room_count)
+    rc = _safe_int(slots.room_count)
+    if rc is not None:
+        params["bedrooms"] = str(rc)
     if slots.rent_min is not None:
-        params["min_price"] = int(slots.rent_min)
+        params["min_price"] = _safe_int(slots.rent_min, 0) or 0
     if slots.rent_max is not None:
-        params["max_price"] = int(slots.rent_max)
+        params["max_price"] = _safe_int(slots.rent_max, 99999) or 99999
     if slots.area_min is not None:
-        params["min_area"] = int(slots.area_min)
+        params["min_area"] = _safe_int(slots.area_min, 0) or 0
     if slots.area_max is not None:
-        params["max_area"] = int(slots.area_max)
+        params["max_area"] = _safe_int(slots.area_max, 99999) or 99999
     if slots.decoration:
         params["decoration"] = slots.decoration
     if slots.orientation:
         params["orientation"] = slots.orientation
     if slots.has_elevator is not None:
         params["elevator"] = "true" if slots.has_elevator else "false"
-    if slots.max_subway_dist is not None:
-        params["max_subway_dist"] = int(slots.max_subway_dist)
-    if slots.max_commute_time is not None:
-        params["commute_to_xierqi_max"] = int(slots.max_commute_time)
+    msd = _safe_int(slots.max_subway_dist, 800)
+    if msd is not None:
+        params["max_subway_dist"] = msd
+    mct = _safe_int(slots.max_commute_time)
+    if mct is not None:
+        params["commute_to_xierqi_max"] = mct
     if slots.rental_type:
         params["rental_type"] = slots.rental_type
     if slots.listing_platform:
