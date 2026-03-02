@@ -26,6 +26,23 @@ python -m agent.main <session_id> "<user_input>"
 
 判题器对接时，每轮请求调用 `agent.main.handle(session_id, user_input)` 即可。
 
+## HTTP 服务
+
+启动本地 HTTP 服务（默认端口 8000，可通过环境变量 `PORT` 修改）：
+
+```bash
+python -m agent.server
+```
+
+- **GET /** 或 **GET /health**：健康检查，返回 `{"status":"ok","service":"rental-agent"}`
+- **POST /**：请求体 JSON `{"session_id": "...", "user_input": "..."}`，返回 `{"session_id", "message", "houses"}`
+
+示例：
+
+```bash
+curl -X POST http://127.0.0.1:8000/ -H "Content-Type: application/json" -d "{\"session_id\":\"EV-45\",\"user_input\":\"海淀区离地铁近的两居有吗？\"}"
+```
+
 ## 测试
 
 - 单元 + 开放用例（Mock API，无需仿真服务）：
@@ -40,6 +57,7 @@ python -m agent.main <session_id> "<user_input>"
 ## 结构
 
 - `agent/main.py`：入口与主流程
+- `agent/server.py`：HTTP 服务（POST / 调用 agent）
 - `agent/session_manager.py`：Session 与 init
 - `agent/intent_parser.py`：意图与槽位解析
 - `agent/api_planner.py`：API 编排与指代消解
