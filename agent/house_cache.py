@@ -16,7 +16,7 @@ _platforms = ["安居客", "链家", "58同城"]
 
 
 def _load_all_houses() -> List[Dict[str, Any]]:
-    """Load ALL houses from ALL platforms into cache."""
+    """Load ALL houses from ALL platforms into cache. Fails silently if API unreachable."""
     all_items = []
     for platform in _platforms:
         try:
@@ -27,27 +27,33 @@ def _load_all_houses() -> List[Dict[str, Any]]:
             )
             items = result.get("items", [])
             total = result.get("total", 0)
-            logger.info("Cache load: platform=%s total=%d items=%d", platform, total, len(items))
-            for item in items:
-                item["_listing_platform"] = platform
-            all_items.extend(items)
+            if items:
+                logger.info("Cache load: platform=%s total=%d items=%d", platform, total, len(items))
+                for item in items:
+                    item["_listing_platform"] = platform
+                all_items.extend(items)
         except Exception as e:
-            logger.error("Cache load failed for %s: %s", platform, e)
-    logger.info("Cache total: %d houses across %d platforms", len(all_items), len(_platforms))
+            logger.warning("Cache load failed for %s: %s", platform, e)
+    if all_items:
+        logger.info("Cache total: %d houses across %d platforms", len(all_items), len(_platforms))
     return all_items
 
 
 def ensure_cache() -> List[Dict[str, Any]]:
     global _all_houses, _loaded
     if not _loaded:
-        _all_houses = _load_all_houses()
         _loaded = True
-        # Also run diagnostics
         try:
-            stats = _house_api.get_house_stats()
-            logger.info("House stats: %s", stats)
+            _all_houses = _load_all_houses()
         except Exception as e:
-            logger.error("Stats failed: %s", e)
+            logger.warning("Cache load entirely failed: %s", e)
+            _all_houses = []
+        if _all_houses:
+            try:
+                stats = _house_api.get_house_stats()
+                logger.info("House stats: %s", stats)
+            except Exception:
+                pass
     return _all_houses
 
 

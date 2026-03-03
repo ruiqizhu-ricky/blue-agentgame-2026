@@ -15,9 +15,12 @@ _initialized = False
 def ensure_session(session_id: str) -> SessionState:
     global _initialized
     if not _initialized:
-        result = _house_api.init_houses()
-        logger.info("init_houses result: %s", str(result)[:500])
         _initialized = True
+        try:
+            result = _house_api.init_houses()
+            logger.info("init_houses: %s", str(result)[:300])
+        except Exception as e:
+            logger.warning("init_houses failed (non-fatal): %s", e)
     if session_id not in _sessions:
         _sessions[session_id] = SessionState()
     return _sessions[session_id]

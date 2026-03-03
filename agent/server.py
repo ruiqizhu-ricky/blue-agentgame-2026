@@ -9,21 +9,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 if __name__ == "__main__":
     sys.path.insert(0, sys.path[0] or ".")
 
-import re as _re
-
 from agent.main import handle
-from agent.api_client import set_api_user_id, clear_api_user_id
-
-
-def _extract_user_id(session_id: str) -> str:
-    """Extract user_id from session_id like 'eval_z00925877_EV-01_...'"""
-    m = _re.match(r"eval_([^_]+)_EV", session_id)
-    if m:
-        return m.group(1)
-    parts = session_id.split("_")
-    if len(parts) >= 2 and parts[0] == "eval":
-        return parts[1]
-    return ""
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -78,11 +64,6 @@ class AgentHandler(BaseHTTPRequestHandler):
         if not session_id or not message:
             self._send(400, {"error": "session_id and message required"})
             return
-        # Extract real user_id from session_id: eval_{user_id}_EV-xx_timestamp
-        user_id = _extract_user_id(session_id)
-        if user_id:
-            set_api_user_id(user_id)
-            logger.info("Using user_id=%s from session_id", user_id)
         t0 = time.time()
         try:
             out = handle(session_id, message, model_ip=model_ip)
@@ -90,9 +71,6 @@ class AgentHandler(BaseHTTPRequestHandler):
             logger.exception("Handle failed")
             self._send(500, {"error": str(e), "status": "error"})
             return
-        finally:
-            if user_id:
-                clear_api_user_id()
         duration_ms = int((time.time() - t0) * 1000)
         # 房源查询/租赁完成后 response 必须为 JSON 字符串 {"message":"...","houses":[...]}
         msg_text = out.get("message", "")
