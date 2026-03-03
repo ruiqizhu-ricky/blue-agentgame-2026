@@ -8,6 +8,7 @@ from . import config
 from .api_executor import execute_calls
 from .api_planner import plan_calls, resolve_reference, slots_to_by_platform_params
 from .intent_parser import merge_slots, parse_intent
+from .api_client import set_api_user_id, clear_api_user_id
 from .llm_client import clear_request_llm, set_request_llm
 from .models import Intent, Slots
 from .post_processor import process as post_process
@@ -95,14 +96,27 @@ def _broaden_slots(slots: Slots) -> Optional[Slots]:
     return None
 
 
+def _extract_user_id(session_id: str) -> str:
+    if session_id.startswith("eval_"):
+        parts = session_id.split("_")
+        if len(parts) >= 2:
+            return parts[1]
+    return ""
+
+
 def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, Any]:
     if model_ip:
         set_request_llm(model_ip, session_id)
+    user_id = _extract_user_id(session_id)
+    if user_id:
+        set_api_user_id(user_id)
     try:
         return _handle_impl(session_id, user_input)
     finally:
         if model_ip:
             clear_request_llm()
+        if user_id:
+            clear_api_user_id()
 
 
 def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:

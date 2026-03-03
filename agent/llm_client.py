@@ -70,6 +70,13 @@ MAX_RETRIES = 2
 RETRY_DELAY = 1.0
 
 
+def _strip_think_tags(text: str) -> str:
+    """Remove <think>...</think> blocks from qwen3 output."""
+    if not text or "<think>" not in text:
+        return text
+    return re.sub(r"<think>[\s\S]*?</think>\s*", "", text).strip()
+
+
 def call_llm(messages: List[Dict[str, str]], *, temperature: float = 0.2, max_tokens: int = 1024) -> str:
     """Call LLM with retry. Returns "" only when all retries exhausted."""
     base = _llm_api_base_ctx.get() or config.LLM_API_BASE
@@ -102,6 +109,7 @@ def _call_api(messages: List[Dict[str, str]], api_base: str, temperature: float 
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "enable_thinking": False,
     }
     try:
         r = requests.post(url, json=body, headers=headers, timeout=60)
@@ -113,12 +121,13 @@ def _call_api(messages: List[Dict[str, str]], api_base: str, temperature: float 
             choices = data.get("choices", [])
             if choices and isinstance(choices[0], dict):
                 msg = choices[0].get("message", {})
-                # Qwen3 thinking mode: content 可能为 None/空，实际输出在 reasoning_content
                 content = msg.get("content") or ""
                 if not content:
                     content = msg.get("reasoning_content") or ""
                 if not content:
                     logger.warning("LLM message fields: %s", list(msg.keys()))
+                # Strip <think>...</think> tags that qwen3 might include
+                content = _strip_think_tags(content)
                 return content
         logger.warning("LLM unexpected response format: %s", str(data)[:300])
         return ""

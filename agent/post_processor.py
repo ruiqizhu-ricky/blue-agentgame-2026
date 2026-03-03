@@ -25,8 +25,7 @@ def client_side_filter(houses: List[Dict[str, Any]], slots: Slots) -> List[Dict[
     result = houses
     if slots.tags:
         result = [h for h in result if any(tag in (h.get("tags") or "") for tag in slots.tags)]
-    if slots.move_in_date:
-        result = [h for h in result if (h.get("available_date") or h.get("available_from") or "") <= slots.move_in_date]
+    # Date filtering already done server-side via available_from_before param; skip client-side to avoid bugs
     return result
 
 

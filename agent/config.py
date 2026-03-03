@@ -49,3 +49,9 @@ SERVER_PORT = _get("server_port", "PORT", 8000, coerce=int)
 BASE_URL = f"http://{SIMULATION_HOST}:{SIMULATION_PORT}"
 HEADERS_WITH_USER = {"X-User-ID": USER_ID}
 HEADERS_NO_USER = {}
+
+
+def get_headers_with_user(user_id: str = "") -> dict:
+    """Return headers with the correct X-User-ID (dynamic per request)."""
+    uid = user_id or USER_ID
+    return {"X-User-ID": uid}

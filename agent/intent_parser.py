@@ -232,7 +232,7 @@ def parse_intent(
     else:
         prompt = INTENT_PROMPT.format(user_input=user_input)
     messages = [{"role": "user", "content": prompt}]
-    raw = call_llm(messages, max_tokens=2048)
+    raw = call_llm(messages, max_tokens=2048, temperature=0.0)
     parsed = parse_intent_response(raw, user_input)
     intent_str = (parsed.get("intent") or "chat").strip().lower().replace("-", "_")
     try:

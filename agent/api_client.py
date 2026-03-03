@@ -1,8 +1,27 @@
+import logging
 import requests
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import config
-from .config import API_TIMEOUT, BASE_URL, HEADERS_NO_USER, HEADERS_WITH_USER
+from .config import API_TIMEOUT, BASE_URL, HEADERS_NO_USER
+
+logger = logging.getLogger(__name__)
+
+_user_id_ctx: ContextVar[str] = ContextVar("api_user_id", default="")
+
+
+def set_api_user_id(user_id: str) -> None:
+    _user_id_ctx.set(user_id)
+
+
+def clear_api_user_id() -> None:
+    _user_id_ctx.set("")
+
+
+def _get_user_headers() -> dict:
+    uid = _user_id_ctx.get() or config.USER_ID
+    return {"X-User-ID": uid}
 
 
 def safe_api_call(
@@ -23,13 +42,18 @@ def safe_api_call(
             return False, "Unsupported method"
         data = r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text
         if isinstance(data, dict) and data.get("code") == 400:
+            logger.warning("API 400: %s %s → %s", method, url, data.get("message", ""))
             return False, data.get("message", "请求参数错误")
         if r.status_code >= 400:
+            logger.warning("API %d: %s %s params=%s", r.status_code, method, url, params)
             return False, data if isinstance(data, str) else data.get("message", str(data))
+        logger.debug("API OK: %s %s params=%s → %s", method, url, params, str(data)[:200])
         return True, data
     except requests.Timeout:
+        logger.error("API timeout: %s %s", method, url)
         return False, "服务超时"
     except Exception as e:
+        logger.error("API error: %s %s → %s", method, url, e)
         return False, str(e)
 
 
@@ -102,7 +126,7 @@ class LandmarkAPI:
 
 class HouseAPI:
     def init_houses(self) -> dict:
-        ok, out = safe_api_call("POST", f"{BASE_URL}/api/houses/init", headers=HEADERS_WITH_USER)
+        ok, out = safe_api_call("POST", f"{BASE_URL}/api/houses/init", headers=_get_user_headers())
         if not ok:
             return {"success": False, "message": out}
         return out if isinstance(out, dict) else {"data": out}
@@ -111,7 +135,7 @@ class HouseAPI:
         ok, out = safe_api_call(
             "GET",
             f"{BASE_URL}/api/houses/{house_id}",
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
         if not ok or not out:
             return None
@@ -123,7 +147,7 @@ class HouseAPI:
         ok, out = safe_api_call(
             "GET",
             f"{BASE_URL}/api/houses/listings/{house_id}",
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
         if not ok:
             return None
@@ -145,7 +169,7 @@ class HouseAPI:
             "GET",
             f"{BASE_URL}/api/houses/by_community",
             params=params,
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
         if not ok:
             return {"total": 0, "items": []}
@@ -225,7 +249,7 @@ class HouseAPI:
             "GET",
             f"{BASE_URL}/api/houses/by_platform",
             params=params,
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
         if not ok:
             return {"total": 0, "items": []}
@@ -249,7 +273,7 @@ class HouseAPI:
             "GET",
             f"{BASE_URL}/api/houses/nearby",
             params=params,
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
         if not ok:
             return {"total": 0, "items": []}
@@ -271,7 +295,7 @@ class HouseAPI:
             "GET",
             f"{BASE_URL}/api/houses/nearby_landmarks",
             params=params,
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
         if not ok:
             return {"items": []}
@@ -281,7 +305,7 @@ class HouseAPI:
         return {"items": []}
 
     def get_house_stats(self) -> dict:
-        ok, out = safe_api_call("GET", f"{BASE_URL}/api/houses/stats", headers=HEADERS_WITH_USER)
+        ok, out = safe_api_call("GET", f"{BASE_URL}/api/houses/stats", headers=_get_user_headers())
         if not ok:
             return {}
         return out.get("data", out) if isinstance(out, dict) else {}
@@ -291,7 +315,7 @@ class HouseAPI:
             "POST",
             f"{BASE_URL}/api/houses/{house_id}/rent",
             params={"listing_platform": listing_platform},
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
 
     def terminate_house(self, house_id: str, listing_platform: str) -> Tuple[bool, Any]:
@@ -299,7 +323,7 @@ class HouseAPI:
             "POST",
             f"{BASE_URL}/api/houses/{house_id}/terminate",
             params={"listing_platform": listing_platform},
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
 
     def offline_house(self, house_id: str, listing_platform: str) -> Tuple[bool, Any]:
@@ -307,5 +331,5 @@ class HouseAPI:
             "POST",
             f"{BASE_URL}/api/houses/{house_id}/offline",
             params={"listing_platform": listing_platform},
-            headers=HEADERS_WITH_USER,
+            headers=_get_user_headers(),
         )
