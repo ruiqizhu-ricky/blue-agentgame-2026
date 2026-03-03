@@ -1,16 +1,24 @@
+import logging
 from typing import Any, Dict, List, Optional
 
 from . import config
 from .api_client import HouseAPI
 from .models import SessionState, Slots
 
+logger = logging.getLogger(__name__)
+
 _sessions: Dict[str, SessionState] = {}
 _house_api = HouseAPI()
+_initialized = False
 
 
 def ensure_session(session_id: str) -> SessionState:
+    global _initialized
+    if not _initialized:
+        result = _house_api.init_houses()
+        logger.info("init_houses result: %s", result)
+        _initialized = True
     if session_id not in _sessions:
-        _house_api.init_houses()
         _sessions[session_id] = SessionState()
     return _sessions[session_id]
 

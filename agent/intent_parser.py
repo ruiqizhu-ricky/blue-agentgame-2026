@@ -151,29 +151,63 @@ def validate_slots(slots: Slots) -> List[str]:
     return errors
 
 
-# 短版 prompt 节省 token（时间片公式 t=1+ceil(max(0,token-1000)*0.3)）
-INTENT_PROMPT = """从用户输入提取意图与槽位，输出纯 JSON。
+INTENT_PROMPT = """你是北京租房意图解析器。从用户输入提取意图和槽位，输出纯JSON（不要输出任何其他内容）。
 
-意图: chat|query_house|query_landmark|query_nearby_landmark|compare_houses|rent_house|terminate_lease|offline_house|follow_up|confirm
-规则: 仅打招呼/寒暄/问能做什么用 chat 且 slots 为空。找房/看房/查房源/有哪些房子/帮我找/推荐 用 query_house；问某套房详情或各平台价格用 compare_houses 填 house_id；租房用 rent_house；退租用 terminate_lease。
-槽位(仅填提及的): district(行政区:海淀/朝阳/大兴等),business_area(商圈:望京/西二旗/国贸/上地等),room_count(int),room_counts(逗号分隔如"2,3"),rent_min,rent_max,area_min,area_max,decoration(精装/简装),orientation,has_elevator(bool),max_subway_dist(近地铁=800),subway_line(如13号线),subway_station(如车公庄站),utilities_type(如民水民电),max_commute_time,rental_type(整租/合租),listing_platform(链家/安居客/58同城),landmark_name,community_name,house_id(HF_xx),sort_by(rent_price/area/subway_distance),sort_order(asc/desc),move_in_date(如3月10日/2026-03-10)
+意图列表:
+- chat: 仅打招呼/寒暄/抱怨/聊天/问你能做什么（不含任何找房需求）
+- query_house: 找房/看房/查房源/推荐房子/有哪些房子（含具体条件如区域、户型、预算等）
+- compare_houses: 问某套房(HF_xx)的详情/各平台价格/电梯/朝向/面积等
+- rent_house: 明确表示要租某套房/办理租赁
+- terminate_lease: 退租/不租了/退掉
+- follow_up: 在上轮查询基础上调整条件（如"预算放宽到8000"/"换大兴区看看"/"有合租的吗"）
+
+判断规则:
+1. "你好""你好呀我想换房子""唉住得不舒服""通勤太长了"等仅表达情绪/打招呼 → chat
+2. 一旦出现具体筛选条件（区域/户型/预算/地铁/装修）→ query_house
+3. 提到HF_xx号并问详情/价格/电梯/朝向 → compare_houses
+4. "就租这套""帮我办理""我要租" → rent_house，reference_to_last_result=true
+5. "退租""不租了""退掉" → terminate_lease
+6. 在已有查询基础上修改条件 → follow_up，仅填变化的槽位
+7. "这套离地铁多远""第一套怎么样" → follow_up + reference_to_last_result=true + reference_index
+
+槽位(仅填用户明确提及的):
+district(行政区:海淀/朝阳/大兴/西城/通州/昌平/丰台/房山/顺义/东城)
+business_area(商圈:望京/西二旗/国贸/上地/回龙观等)
+room_count(int) room_counts(逗号分隔如"2,3")
+rent_min rent_max(数字,元)
+area_min area_max(数字,平米)
+decoration(精装/简装) orientation(朝南/南北等) has_elevator(bool)
+max_subway_dist(近地铁=800) subway_line(如13号线) subway_station(如车公庄站)
+utilities_type(民水民电/商水商电) max_commute_time(分钟)
+rental_type(整租/合租) listing_platform(链家/安居客/58同城)
+landmark_name(公司/地标名如百度/小米/望京SOHO) community_name(小区名)
+house_id(如HF_38) sort_by(rent_price/area/subway_distance) sort_order(asc/desc)
+move_in_date(如3月10日)
 
 用户: {user_input}
 
-输出JSON: {{"intent":"","slots":{{}},"reference_to_last_result":false,"reference_index":null}}
-"""
+输出JSON: {{"intent":"","slots":{{}},"reference_to_last_result":false,"reference_index":null}}"""
+
 INTENT_PROMPT_WITH_CTX = """上轮房源IDs: {last_ids}
 对话摘要: {history_summary}
 
-从用户输入提取意图与槽位，输出纯 JSON。
-意图: chat|query_house|query_landmark|query_nearby_landmark|compare_houses|rent_house|terminate_lease|offline_house|follow_up|confirm
-规则: 仅打招呼/寒暄用 chat 且 slots 为空。找房/看房 用 query_house。问某套房详情/各平台价格 用 compare_houses 填 house_id。租房 rent_house，退租 terminate_lease。
-槽位: district(行政区),business_area(商圈如望京/西二旗),room_count,room_counts("2,3"),rent_min,rent_max,decoration,subway_line(13号线),subway_station(车公庄站),utilities_type(民水民电),max_subway_dist(近地铁=800),sort_by,sort_order,community_name,house_id,listing_platform 等
+你是北京租房意图解析器。从用户输入提取意图和槽位，输出纯JSON。
+
+意图: chat|query_house|compare_houses|rent_house|terminate_lease|follow_up
+规则:
+1. 仅打招呼/情绪表达 → chat(slots空)
+2. 新的找房条件 → query_house
+3. 问HF_xx详情/价格 → compare_houses(填house_id)
+4. "就租这套/帮我办理" → rent_house(reference_to_last_result=true)
+5. "退租/不租了" → terminate_lease
+6. 修改上轮条件(换区域/调预算/加条件) → follow_up(仅填变化槽位)
+7. "这套/第一套/便宜那套"问详情 → follow_up + reference_to_last_result=true
+
+槽位: district,business_area(望京/西二旗等),room_count,room_counts("2,3"),rent_min,rent_max,area_min,area_max,decoration,has_elevator,max_subway_dist(近地铁=800),subway_line,subway_station,utilities_type,max_commute_time,rental_type,listing_platform,landmark_name,community_name,house_id,sort_by,sort_order,move_in_date
 
 用户: {user_input}
 
-输出JSON: {{"intent":"","slots":{{}},"reference_to_last_result":false,"reference_index":null}}
-"""
+输出JSON: {{"intent":"","slots":{{}},"reference_to_last_result":false,"reference_index":null}}"""
 
 
 def parse_intent(

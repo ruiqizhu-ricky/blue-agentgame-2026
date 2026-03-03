@@ -1,7 +1,8 @@
 """
 Entry point: receive judge request (session_id, user_input), return { session_id, message, houses }.
 """
-from typing import Any, Dict, List
+import logging
+from typing import Any, Dict, List, Optional
 
 from . import config
 from .api_executor import execute_calls
@@ -20,6 +21,8 @@ from .session_manager import (
     append_turn,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _extract_house_ids(houses: List[Dict[str, Any]]) -> List[str]:
     ids = []
@@ -35,10 +38,8 @@ def _no_match_from_tool_results(
     house_results: List[Dict[str, Any]],
     total: int,
 ) -> bool:
-    """根据工具调用结果与聚合结果判断无匹配：总数为0且无房源；或主查询工具失败/返回0条。"""
     if total == 0 and not house_results:
         return True
-    # 若主查询工具（唯一或第一个）明确返回 0 或失败，以工具为准
     for t in tool_results:
         if not t.get("ok"):
             return True
@@ -55,17 +56,46 @@ def _no_match_from_tool_results(
 
 
 def _rent_ok_from_tool_results(tool_results: List[Dict[str, Any]]) -> bool:
-    """根据工具调用结果判断租赁是否成功。"""
     for t in tool_results:
         if t.get("tool") == "rent_house" and t.get("ok"):
             return True
     return False
 
 
+def _broaden_slots(slots: Slots) -> Optional[Slots]:
+    """Remove the most restrictive filter to broaden the search. Returns None if nothing to remove."""
+    import copy
+    s = copy.deepcopy(slots)
+    # Priority: remove decoration → elevator → subway_dist → area → orientation → utilities
+    if s.decoration:
+        s.decoration = None
+        return s
+    if s.has_elevator is not None:
+        s.has_elevator = None
+        return s
+    if s.max_subway_dist is not None:
+        s.max_subway_dist = None
+        s.near_subway = None
+        return s
+    if s.area_min is not None:
+        s.area_min = None
+        return s
+    if s.orientation:
+        s.orientation = None
+        return s
+    if s.utilities_type:
+        s.utilities_type = None
+        return s
+    if s.subway_line:
+        s.subway_line = None
+        return s
+    if s.subway_station:
+        s.subway_station = None
+        return s
+    return None
+
+
 def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, Any]:
-    """Process one user turn; return { session_id, message, houses }.
-    When model_ip is set (from contest /api/v1/chat), LLM is called at http://model_ip:8888 with Session-ID.
-    """
     if model_ip:
         set_request_llm(model_ip, session_id)
     try:
@@ -77,7 +107,6 @@ def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, An
 
 def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     state = ensure_session(session_id)
-    # 仅取最近 3 轮供 prompt，省 token
     history = get_history_for_prompt(session_id, max_turns=3)
     last_result_ids = _extract_house_ids(state.last_results)
 
@@ -86,7 +115,7 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     # Merge slots for FOLLOW_UP
     if intent == Intent.FOLLOW_UP and state.accumulated_filters is not None:
         slots = merge_slots(state.accumulated_filters, slots)
-    elif intent == Intent.QUERY_HOUSE or intent == Intent.FOLLOW_UP:
+    elif intent == Intent.QUERY_HOUSE:
         state.accumulated_filters = slots
 
     # Resolve house_id for rent/terminate/offline from last_results
@@ -95,7 +124,7 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
         if house_id:
             slots = Slots(house_id=house_id, listing_platform=slots.listing_platform or "安居客")
 
-    # CHAT: no API, generate reply only
+    # CHAT: no API
     if intent == Intent.CHAT:
         message = generate_reply(user_input, Slots(), [], 0, history, intent="chat")
         append_turn(session_id, user_input, message, intent=intent.value, result_house_ids=[])
@@ -104,7 +133,23 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     calls = plan_calls(intent, slots)
     house_results, extra, tool_results = execute_calls(calls) if calls else ([], {}, [])
 
-    # Sort params for post_process (from slots)
+    # ---- Broadening retry: if 0 results and query_house, try with fewer filters ----
+    if intent in (Intent.QUERY_HOUSE, Intent.FOLLOW_UP) and not house_results:
+        broadened = _broaden_slots(slots)
+        retry_count = 0
+        while broadened and retry_count < 3:
+            retry_calls = plan_calls(intent, broadened)
+            retry_results, retry_extra, retry_tool = execute_calls(retry_calls) if retry_calls else ([], {}, [])
+            tool_results.extend(retry_tool)
+            if retry_results:
+                house_results = retry_results
+                extra.update(retry_extra)
+                slots = broadened
+                logger.info("Broadened query found %d results after removing filters", len(house_results))
+                break
+            broadened = _broaden_slots(broadened)
+            retry_count += 1
+
     sort_by = slots.sort_by
     sort_order = slots.sort_order
     if not sort_by and intent == Intent.QUERY_HOUSE and slots.max_subway_dist:
@@ -120,10 +165,9 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     )
 
     set_last_results(session_id, processed)
-    if intent == Intent.FOLLOW_UP:
+    if intent in (Intent.QUERY_HOUSE, Intent.FOLLOW_UP):
         set_accumulated_filters(session_id, slots)
 
-    # 用工具调用结果做判断：无结果 / 租赁成功 以 tool_results 为准
     no_match = _no_match_from_tool_results(tool_results, house_results, total)
     rent_ok = intent == Intent.RENT_HOUSE and slots.house_id and _rent_ok_from_tool_results(tool_results)
     ask_more = "其他" in user_input or "都给" in user_input
@@ -160,7 +204,6 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
 
 
 def run_app():
-    """Simple HTTP server or CLI for testing."""
     import json
     import sys
     if len(sys.argv) >= 3:

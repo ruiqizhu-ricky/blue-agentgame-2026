@@ -66,35 +66,47 @@ def generate_reply(
     # 短 hint 省 token，保证判题关键词
     hints = []
     if no_match:
-        hints.append("必含: 没有")
+        hints.append('回复必含"没有"二字')
     if single_match:
-        hints.append('必含: "没有其他的了，只有这一套"')
+        hints.append('回复必含"没有其他的了，只有这一套"')
     if rent_ok:
-        hints.append("必以「好的」开头")
+        hints.append('回复必须以"好的"开头')
     if houses and not no_match:
-        hints.append("必含全部房源ID；排序时含 subway_distance 与 asc/desc")
+        all_ids = [h.get("house_id") or h.get("id") for h in houses]
+        hints.append(f"回复必含所有房源ID: {','.join(str(x) for x in all_ids if x)}")
+        if slots.sort_by:
+            sort_field = {"rent_price": "price", "subway_distance": "subway_distance", "area": "area"}.get(slots.sort_by, slots.sort_by)
+            hints.append(f"回复体现排序: 按 {sort_field} {slots.sort_order or 'asc'}")
         if slots.max_subway_dist == 800:
-            hints.append("体现 800米")
+            hints.append("回复体现800米地铁距离")
+        if slots.district:
+            hints.append(f"回复体现区域: {slots.district}")
+        if slots.room_count:
+            hints.append(f"回复体现户型: {slots.room_count}居室")
 
-    system = """北京租房顾问。用自然中文回复。依据「工具调用结果」和下方「结果」数据组织回复。每套房源写清: 房源ID、小区、区、户型、面积、月租、装修、朝向、地铁站及距离、西二旗通勤。无结果要说「没有」；仅一套时说「只有这一套」或「没有其他的了，只有这一套」；租房确认以「好的」开头。回复须含所有房源ID。"""
-    # 打招呼/问能力时不要给「结果0套」避免回复成「没有」
-    if intent == "chat" and (_is_greeting(user_input) or _is_capability_ask(user_input)):
-        user_content = f"用户说: {user_input}\n请简短问候并介绍你能做什么（北京租房顾问：可帮查区域/户型/预算/地铁/通勤等），不要说「没有」或「暂无房源」。\n回复:"
+    system = """你是北京租房顾问。用自然中文回复，基于工具返回的真实数据。
+规则：
+1. 有房源时：列出每套的房源ID、小区、区、户型、面积(㎡)、月租(元)、装修、朝向、地铁站及距离(米)、西二旗通勤(分钟)
+2. 无结果时：回复必须包含「没有」二字
+3. 仅一套时：回复包含「没有其他的了，只有这一套」
+4. 租房成功时：以「好的」开头
+5. 按排序时：回复中要体现排序依据（如 subway_distance asc）
+6. 回复中必须包含所有房源ID
+7. 问候/聊天时：正常回复，不说「没有」"""
+    if intent == "chat":
+        user_content = f"用户: {user_input}\n请自然回复（租房顾问身份，可引导用户说出需求）。"
     else:
         tool_summary = _format_tool_results_summary(tool_results or [])
-        user_content = f"问:{user_input}\n条件:{slots_json}\n"
+        user_content = f"用户问: {user_input}\n筛选条件: {slots_json}\n"
         if tool_summary:
-            user_content += f"工具调用结果:{tool_summary}\n"
-        user_content += f"结果(共{total}套):{houses_json}"
+            user_content += f"工具调用结果: {tool_summary}\n"
+        user_content += f"查询结果(共{total}套): {houses_json}"
         if listings:
-            user_content += "\n该房源各平台挂牌:" + json.dumps(listings, ensure_ascii=False)
+            user_content += "\n各平台挂牌: " + json.dumps(listings, ensure_ascii=False)
     if hints:
-        user_content += "\n" + " ".join(hints)
-    # 最多带最近 2 轮对话省 token
-    if history:
-        short_hist = history[-4:]
-        user_content += "\n近轮:" + json.dumps(short_hist, ensure_ascii=False)
-    user_content += "\n回复:"
+        user_content += "\n【必须遵守】" + " ".join(hints)
+    if history and intent != "chat":
+        user_content += "\n近轮对话:" + json.dumps(history[-4:], ensure_ascii=False)
 
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user_content}]
     raw = call_llm(messages, max_tokens=1024)
