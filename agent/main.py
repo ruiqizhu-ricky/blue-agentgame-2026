@@ -8,8 +8,6 @@ from . import config
 from .api_executor import execute_calls
 from .api_planner import plan_calls, resolve_reference, slots_to_by_platform_params
 from .intent_parser import merge_slots, parse_intent
-from .api_client import set_api_user_id, clear_api_user_id
-from .house_cache import ensure_cache, search_houses as cache_search
 from .llm_client import clear_request_llm, set_request_llm
 from .models import Intent, Slots
 from .post_processor import process as post_process
@@ -64,108 +62,15 @@ def _rent_ok_from_tool_results(tool_results: List[Dict[str, Any]]) -> bool:
     return False
 
 
-def _slots_to_cache_params(slots: Slots) -> dict:
-    """Convert Slots to cache_search kwargs."""
-    p = {}
-    if slots.district:
-        p["district"] = slots.district
-    if slots.business_area:
-        p["business_area"] = slots.business_area
-    if slots.room_counts:
-        p["bedrooms"] = slots.room_counts
-    elif slots.room_count is not None:
-        p["bedrooms"] = str(slots.room_count)
-    if slots.rent_min is not None:
-        p["min_price"] = int(slots.rent_min)
-    if slots.rent_max is not None:
-        p["max_price"] = int(slots.rent_max)
-    if slots.area_min is not None:
-        p["min_area"] = int(slots.area_min)
-    if slots.area_max is not None:
-        p["max_area"] = int(slots.area_max)
-    if slots.decoration:
-        p["decoration"] = slots.decoration
-    if slots.orientation:
-        p["orientation"] = slots.orientation
-    if slots.has_elevator is not None:
-        p["elevator"] = "true" if slots.has_elevator else "false"
-    if slots.max_subway_dist is not None:
-        p["max_subway_dist"] = slots.max_subway_dist
-    if slots.subway_line:
-        p["subway_line"] = slots.subway_line
-    if slots.subway_station:
-        p["subway_station"] = slots.subway_station
-    if slots.utilities_type:
-        p["utilities_type"] = slots.utilities_type
-    if slots.rental_type:
-        p["rental_type"] = slots.rental_type
-    if slots.listing_platform:
-        p["listing_platform"] = slots.listing_platform
-    if slots.max_commute_time is not None:
-        p["commute_to_xierqi_max"] = slots.max_commute_time
-    if slots.move_in_date:
-        p["available_from_before"] = slots.move_in_date
-    if slots.sort_by:
-        p["sort_by"] = {"rent_price": "price", "subway_distance": "subway", "area": "area"}.get(slots.sort_by, slots.sort_by)
-    if slots.sort_order:
-        p["sort_order"] = slots.sort_order
-    return p
-
-
-def _broaden_slots(slots: Slots) -> Optional[Slots]:
-    """Remove the most restrictive filter to broaden the search. Returns None if nothing to remove."""
-    import copy
-    s = copy.deepcopy(slots)
-    # Priority: remove decoration → elevator → subway_dist → area → orientation → utilities
-    if s.decoration:
-        s.decoration = None
-        return s
-    if s.has_elevator is not None:
-        s.has_elevator = None
-        return s
-    if s.max_subway_dist is not None:
-        s.max_subway_dist = None
-        s.near_subway = None
-        return s
-    if s.area_min is not None:
-        s.area_min = None
-        return s
-    if s.orientation:
-        s.orientation = None
-        return s
-    if s.utilities_type:
-        s.utilities_type = None
-        return s
-    if s.subway_line:
-        s.subway_line = None
-        return s
-    if s.subway_station:
-        s.subway_station = None
-        return s
-    return None
-
-
-def _extract_user_id(session_id: str) -> str:
-    if session_id.startswith("eval_"):
-        parts = session_id.split("_")
-        if len(parts) >= 2:
-            return parts[1]
-    return ""
-
 
 def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, Any]:
     if model_ip:
         set_request_llm(model_ip, session_id)
-    user_id = _extract_user_id(session_id)
-    if user_id:
-        set_api_user_id(user_id)
     try:
         return _handle_impl(session_id, user_input)
     finally:
         if model_ip:
             clear_request_llm()
-        if user_id:
-            clear_api_user_id()
 
 
 def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
@@ -193,20 +98,8 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
         append_turn(session_id, user_input, message, intent=intent.value, result_house_ids=[])
         return {"session_id": session_id, "message": message, "houses": [], "tool_results": []}
 
-    # Ensure cache is loaded
-    ensure_cache()
-
     calls = plan_calls(intent, slots)
     house_results, extra, tool_results = execute_calls(calls) if calls else ([], {}, [])
-
-    # ---- Cache fallback: if API returns 0 for query, try client-side search ----
-    if intent in (Intent.QUERY_HOUSE, Intent.FOLLOW_UP) and not house_results and not slots.house_id:
-        cache_params = _slots_to_cache_params(slots)
-        cache_result = cache_search(**cache_params)
-        if cache_result.get("items"):
-            house_results = cache_result["items"]
-            logger.info("Cache fallback found %d results", len(house_results))
-            tool_results.append({"tool": "cache_search", "params": cache_params, "ok": True, "total": cache_result["total"], "items_count": len(house_results)})
 
     sort_by = slots.sort_by
     sort_order = slots.sort_order

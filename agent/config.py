@@ -38,7 +38,7 @@ def _get(key: str, env_key: str, default, coerce=str):
 SIMULATION_HOST = _get("simulation_host", "SIMULATION_HOST", "127.0.0.1")
 SIMULATION_PORT = _get("simulation_port", "SIMULATION_PORT", 8080, coerce=int)
 USER_ID = _get("user_id", "USER_ID", "test_user")
-API_TIMEOUT = _get("api_timeout", "API_TIMEOUT", 5, coerce=int)
+API_TIMEOUT = _get("api_timeout", "API_TIMEOUT", 2, coerce=int)
 MAX_HOUSES = _get("max_houses", "MAX_HOUSES", 5, coerce=int)
 MAX_HISTORY_TURNS = _get("max_history_turns", "MAX_HISTORY_TURNS", 6, coerce=int)
 LLM_API_BASE = _get("llm_api_base", "LLM_API_BASE", "")

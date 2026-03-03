@@ -60,7 +60,7 @@ def test_open_cases_mock():
     mock_house.terminate_house = lambda house_id, listing_platform: (True, {})
     mock_house.offline_house = lambda house_id, listing_platform: (True, {})
 
-    with patch("agent.api_executor._house", mock_house), patch("agent.session_manager._house_api", mock_house):
+    with patch("agent.api_executor._house", mock_house):
         cases_path = Path(__file__).parent / "open_cases.json"
         with open(cases_path, "r", encoding="utf-8") as f:
             cases = json.load(f)
