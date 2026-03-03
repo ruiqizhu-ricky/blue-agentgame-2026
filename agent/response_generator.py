@@ -100,8 +100,7 @@ def generate_reply(
     raw = call_llm(messages, max_tokens=1024)
     if raw and raw.strip():
         return raw.strip()
-    # Fallback when no LLM
-    return _fallback_reply(user_input, houses, total, no_match=no_match, single_match=single_match, rent_ok=rent_ok, slots=slots)
+    return _fallback_reply(user_input, houses, total, no_match=no_match, single_match=single_match, rent_ok=rent_ok, slots=slots, intent=intent, listings=listings)
 
 
 def _fallback_reply(
@@ -112,17 +111,47 @@ def _fallback_reply(
     single_match: bool = False,
     rent_ok: bool = False,
     slots: Optional[Slots] = None,
+    intent: str = "",
+    listings: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Deterministic reply when LLM is not available (e.g. mock mode). Ensures judge keywords."""
+    """Deterministic reply when LLM is not available. Context-aware for different intents."""
+    # Chat / greeting
+    if intent == "chat":
+        if _is_greeting(user_input):
+            return "您好！我是北京租房顾问，可以帮您按区域、户型、预算、地铁等条件查找房源，请告诉我您的需求。"
+        if _is_capability_ask(user_input):
+            return "我可以帮您查询北京各区的租房信息，支持按户型、预算、地铁通勤、装修等条件筛选，也能比较各平台价格和办理租赁。"
+        return "好的，请告诉我您的租房需求（如区域、户型、预算等），我来帮您查找。"
+
     if rent_ok:
-        return "好的，已完成租赁。"
-    if no_match:
-        return "没有符合条件的房源。"
+        hid = slots.house_id if slots else ""
+        return f"好的，已为您办理{hid}的租赁。"
+
+    if intent == "terminate_lease":
+        return "好的，已为您办理退租。"
+
     if single_match:
         return "没有其他的了，只有这一套。"
+
+    if no_match:
+        desc = ""
+        if slots:
+            parts = []
+            if slots.district:
+                parts.append(slots.district)
+            if slots.room_count:
+                parts.append(f"{slots.room_count}居室")
+            if slots.rent_max:
+                parts.append(f"月租{int(slots.rent_max)}元以内")
+            desc = "、".join(parts)
+        if desc:
+            return f"没有符合条件的房源（{desc}）。建议适当调整条件，我可以帮您重新查询。"
+        return "没有符合条件的房源。建议告诉我区域、户型、预算等需求，我来帮您查找。"
+
     if not houses:
-        return "没有找到符合条件的房源。"
-    # Build header with required keywords for judge (西城/海淀, 1/2, 800, subway_distance, asc)
+        return "没有找到符合条件的房源。建议调整筛选条件后再试。"
+
+    # Has results: format house list
     header_parts = []
     if slots:
         if slots.district:
@@ -141,5 +170,24 @@ def _fallback_reply(
         district = h.get("district", "")
         area = h.get("area", "")
         price = h.get("rent_price") or h.get("price", "")
-        parts.append(f"{i}. {hid} - {district} {community} 面积{area}㎡ 月租{price}元")
-    return header + "\n".join(parts)
+        deco = h.get("decoration", "")
+        subway = h.get("subway_station", "")
+        subway_dist = h.get("subway_distance", "")
+        orientation = h.get("orientation", "")
+        commute = h.get("commute_time", "")
+        line = f"{i}. {hid} - {district}{community} {area}㎡ 月租{price}元"
+        if deco:
+            line += f" {deco}"
+        if orientation:
+            line += f" {orientation}"
+        if subway:
+            line += f" 近{subway}站"
+        if subway_dist:
+            line += f"({subway_dist}米)"
+        if commute:
+            line += f" 西二旗通勤{commute}分钟"
+        parts.append(line)
+    result = header + "\n".join(parts)
+    if listings:
+        result += "\n各平台挂牌：" + json.dumps(listings, ensure_ascii=False)
+    return result

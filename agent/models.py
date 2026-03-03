@@ -19,7 +19,9 @@ class Intent(Enum):
 @dataclass
 class Slots:
     district: Optional[str] = None
+    business_area: Optional[str] = None  # 商圈，如 望京/西二旗/国贸
     room_count: Optional[int] = None
+    room_counts: Optional[str] = None  # 逗号分隔，如 "2,3"
     rent_min: Optional[float] = None
     rent_max: Optional[float] = None
     area_min: Optional[float] = None
@@ -40,6 +42,9 @@ class Slots:
     move_in_date: Optional[str] = None
     near_subway: Optional[bool] = None
     tags: Optional[List[str]] = None
+    subway_line: Optional[str] = None  # 地铁线路，如 13号线
+    subway_station: Optional[str] = None  # 地铁站名，如 车公庄站
+    utilities_type: Optional[str] = None  # 水电类型，如 民水民电
 
     def to_dict(self) -> Dict[str, Any]:
         d = {}

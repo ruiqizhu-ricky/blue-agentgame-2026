@@ -30,9 +30,15 @@ def slots_to_by_platform_params(slots: Slots) -> Dict[str, Any]:
     params: Dict[str, Any] = {}
     if slots.district:
         params["district"] = slots.district
-    rc = _safe_int(slots.room_count)
-    if rc is not None:
-        params["bedrooms"] = str(rc)
+    if slots.business_area:
+        params["area"] = slots.business_area
+    # bedrooms: 逗号分隔支持多居室 "2,3"
+    if slots.room_counts:
+        params["bedrooms"] = slots.room_counts
+    elif slots.room_count is not None:
+        rc = _safe_int(slots.room_count)
+        if rc is not None:
+            params["bedrooms"] = str(rc)
     if slots.rent_min is not None:
         params["min_price"] = _safe_int(slots.rent_min, 0) or 0
     if slots.rent_max is not None:
@@ -47,13 +53,18 @@ def slots_to_by_platform_params(slots: Slots) -> Dict[str, Any]:
         params["orientation"] = slots.orientation
     if slots.has_elevator is not None:
         params["elevator"] = "true" if slots.has_elevator else "false"
-    # 仅用户明确要求「近地铁」或填了 max_subway_dist 时才加，避免无谓过滤导致 0 结果
     if slots.max_subway_dist is not None:
         msd = _safe_int(slots.max_subway_dist, 800)
         if msd is not None:
             params["max_subway_dist"] = msd
     elif slots.near_subway:
         params["max_subway_dist"] = 800
+    if slots.subway_line:
+        params["subway_line"] = slots.subway_line
+    if slots.subway_station:
+        params["subway_station"] = slots.subway_station
+    if slots.utilities_type:
+        params["utilities_type"] = slots.utilities_type
     mct = _safe_int(slots.max_commute_time)
     if mct is not None:
         params["commute_to_xierqi_max"] = mct
@@ -122,11 +133,10 @@ def plan_calls(intent: Intent, slots: Slots) -> List[APICall]:
             calls.append(APICall("get_house", {"house_id": slots.house_id}))
             return calls
         if slots.landmark_name:
-            calls.append(APICall("get_landmark_by_name", {"name": slots.landmark_name}))
-            nearby_params = {"max_distance": 2000}
+            nearby_params = {"landmark_id": slots.landmark_name, "max_distance": 2000, "page": 1, "page_size": 50}
             if slots.listing_platform:
                 nearby_params["listing_platform"] = slots.listing_platform
-            calls.append(APICall("get_houses_nearby", nearby_params, depends_on="step0.id"))
+            calls.append(APICall("get_houses_nearby", nearby_params))
             return calls
         if slots.community_name:
             params = {"community": slots.community_name}

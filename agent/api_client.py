@@ -158,6 +158,7 @@ class HouseAPI:
         self,
         listing_platform: Optional[str] = None,
         district: Optional[str] = None,
+        area: Optional[str] = None,
         min_price: Optional[int] = None,
         max_price: Optional[int] = None,
         bedrooms: Optional[str] = None,
@@ -168,6 +169,9 @@ class HouseAPI:
         min_area: Optional[int] = None,
         max_area: Optional[int] = None,
         max_subway_dist: Optional[int] = None,
+        subway_line: Optional[str] = None,
+        subway_station: Optional[str] = None,
+        utilities_type: Optional[str] = None,
         commute_to_xierqi_max: Optional[int] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
@@ -181,6 +185,8 @@ class HouseAPI:
             params["listing_platform"] = listing_platform
         if district:
             params["district"] = district
+        if area:
+            params["area"] = area
         if min_price is not None:
             params["min_price"] = min_price
         if max_price is not None:
@@ -201,6 +207,12 @@ class HouseAPI:
             params["max_area"] = int(max_area)
         if max_subway_dist is not None:
             params["max_subway_dist"] = int(max_subway_dist)
+        if subway_line:
+            params["subway_line"] = subway_line
+        if subway_station:
+            params["subway_station"] = subway_station
+        if utilities_type:
+            params["utilities_type"] = utilities_type
         if commute_to_xierqi_max is not None:
             params["commute_to_xierqi_max"] = int(commute_to_xierqi_max)
         if sort_by:

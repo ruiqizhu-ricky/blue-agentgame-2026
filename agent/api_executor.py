@@ -105,6 +105,7 @@ def _execute_one(name: str, params: Dict[str, Any]) -> Any:
         out = _house.get_houses_by_platform(
             listing_platform=params.get("listing_platform"),
             district=params.get("district"),
+            area=params.get("area"),
             min_price=params.get("min_price"),
             max_price=params.get("max_price"),
             bedrooms=params.get("bedrooms"),
@@ -115,6 +116,9 @@ def _execute_one(name: str, params: Dict[str, Any]) -> Any:
             min_area=params.get("min_area"),
             max_area=params.get("max_area"),
             max_subway_dist=params.get("max_subway_dist"),
+            subway_line=params.get("subway_line"),
+            subway_station=params.get("subway_station"),
+            utilities_type=params.get("utilities_type"),
             commute_to_xierqi_max=params.get("commute_to_xierqi_max"),
             sort_by=params.get("sort_by"),
             sort_order=params.get("sort_order"),
