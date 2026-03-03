@@ -9,21 +9,15 @@ logger = logging.getLogger(__name__)
 
 _sessions: Dict[str, SessionState] = {}
 _house_api = HouseAPI()
-_initialized_users = set()
+_initialized = False
 
 
 def ensure_session(session_id: str) -> SessionState:
-    # Extract user_id from session for per-user init
-    user_id = ""
-    if session_id.startswith("eval_"):
-        parts = session_id.split("_")
-        if len(parts) >= 2:
-            user_id = parts[1]
-    init_key = user_id or "default"
-    if init_key not in _initialized_users:
+    global _initialized
+    if not _initialized:
         result = _house_api.init_houses()
-        logger.info("init_houses (user=%s) result: %s", init_key, result)
-        _initialized_users.add(init_key)
+        logger.info("init_houses result: %s", str(result)[:500])
+        _initialized = True
     if session_id not in _sessions:
         _sessions[session_id] = SessionState()
     return _sessions[session_id]
