@@ -2,7 +2,7 @@ import copy
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
-from .llm_client import call_llm, parse_intent_response
+from .llm_client import call_llm_text
 from .models import Intent, Slots
 
 VALID_DISTRICTS = ["海淀", "朝阳", "通州", "昌平", "大兴", "房山", "西城", "丰台", "顺义", "东城"]
@@ -210,6 +210,24 @@ INTENT_PROMPT_WITH_CTX = """上轮房源IDs: {last_ids}
 输出JSON: {{"intent":"","slots":{{}},"reference_to_last_result":false,"reference_index":null}}"""
 
 
+def _parse_intent_json(raw: str, user_input: str) -> Dict[str, Any]:
+    """Parse LLM JSON output for intent/slots."""
+    import re as _re
+    if not raw or not raw.strip():
+        return {"intent": "chat", "slots": {}, "reference_to_last_result": False, "reference_index": None}
+    text = raw.strip()
+    m = _re.search(r"\{[\s\S]*\}", text)
+    if m:
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            pass
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return {"intent": "chat", "slots": {}, "reference_to_last_result": False, "reference_index": None}
+
+
 def parse_intent(
     user_input: str,
     history: List[Dict[str, str]],
@@ -232,8 +250,8 @@ def parse_intent(
     else:
         prompt = INTENT_PROMPT.format(user_input=user_input)
     messages = [{"role": "user", "content": prompt}]
-    raw = call_llm(messages, max_tokens=2048, temperature=0.0)
-    parsed = parse_intent_response(raw, user_input)
+    raw = call_llm_text(messages, max_tokens=2048, temperature=0.0)
+    parsed = _parse_intent_json(raw, user_input)
     intent_str = (parsed.get("intent") or "chat").strip().lower().replace("-", "_")
     try:
         intent = Intent(intent_str)

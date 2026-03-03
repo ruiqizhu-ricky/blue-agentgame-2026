@@ -64,11 +64,8 @@ def test_plan_calls_rent():
     assert calls[0].params["listing_platform"] == "安居客"
 
 
-def test_mock_intent_parsing():
-    from agent.llm_client import parse_intent_response, MOCK_INTENT_RESPONSES
-    u = "西城区离地铁近的一居室有吗？按离地铁从近到远排。"
-    out = parse_intent_response("", u)
-    assert out["intent"] == "query_house"
-    assert out["slots"].get("district") == "西城"
-    assert out["slots"].get("room_count") == 1
-    assert out["slots"].get("max_subway_dist") == 800
+def test_tools_defined():
+    from agent.tools import TOOLS, SYSTEM_PROMPT
+    assert len(TOOLS) >= 5
+    assert "get_houses_by_platform" in [t["function"]["name"] for t in TOOLS]
+    assert "租房顾问" in SYSTEM_PROMPT

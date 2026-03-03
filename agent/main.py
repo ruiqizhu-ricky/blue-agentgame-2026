@@ -1,66 +1,21 @@
 """
-Entry point: receive judge request (session_id, user_input), return { session_id, message, houses }.
+Agent entry point: function calling architecture.
+LLM decides which tools to call → we execute → LLM generates final response.
 """
+import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from . import config
-from .api_executor import execute_calls
-from .api_planner import plan_calls, resolve_reference, slots_to_by_platform_params
-from .intent_parser import merge_slots, parse_intent
-from .llm_client import clear_request_llm, set_request_llm
-from .models import Intent, Slots
-from .post_processor import process as post_process
-from .response_generator import generate_reply
-from .session_manager import (
-    ensure_session,
-    get_history_for_prompt,
-    get_session,
-    set_accumulated_filters,
-    set_last_results,
-    append_turn,
-)
+from .api_client import HouseAPI, LandmarkAPI
+from .llm_client import call_llm, clear_request_llm, set_request_llm
+from .tools import TOOLS, SYSTEM_PROMPT
+from .session_manager import ensure_session, get_history_for_prompt, append_turn
 
 logger = logging.getLogger(__name__)
 
-
-def _extract_house_ids(houses: List[Dict[str, Any]]) -> List[str]:
-    ids = []
-    for h in houses:
-        hid = h.get("house_id") or h.get("id")
-        if hid:
-            ids.append(str(hid))
-    return ids
-
-
-def _no_match_from_tool_results(
-    tool_results: List[Dict[str, Any]],
-    house_results: List[Dict[str, Any]],
-    total: int,
-) -> bool:
-    if total == 0 and not house_results:
-        return True
-    for t in tool_results:
-        if not t.get("ok"):
-            return True
-        name = t.get("tool", "")
-        if name in ("get_houses_by_platform", "get_houses_by_community", "get_houses_nearby"):
-            if t.get("total", 0) == 0 and t.get("items_count", 0) == 0:
-                return True
-            break
-        if name == "get_house":
-            if not t.get("house_id"):
-                return True
-            break
-    return False
-
-
-def _rent_ok_from_tool_results(tool_results: List[Dict[str, Any]]) -> bool:
-    for t in tool_results:
-        if t.get("tool") == "rent_house" and t.get("ok"):
-            return True
-    return False
-
+_house_api = HouseAPI()
+_landmark_api = LandmarkAPI()
 
 
 def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, Any]:
@@ -75,87 +30,189 @@ def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, An
 
 def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     state = ensure_session(session_id)
-    history = get_history_for_prompt(session_id, max_turns=3)
-    last_result_ids = _extract_house_ids(state.last_results)
+    history = get_history_for_prompt(session_id, max_turns=5)
 
-    intent, slots, ref_to_last, ref_index = parse_intent(user_input, history, last_result_ids)
+    # Build messages: system + history + current user message
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": user_input})
 
-    # Merge slots for FOLLOW_UP
-    if intent == Intent.FOLLOW_UP and state.accumulated_filters is not None:
-        slots = merge_slots(state.accumulated_filters, slots)
-    elif intent == Intent.QUERY_HOUSE:
-        state.accumulated_filters = slots
+    # Step 1: Call LLM with tools
+    result = call_llm(messages, tools=TOOLS, max_tokens=2048, temperature=0.0)
+    tool_calls = result.get("tool_calls", [])
+    content = result.get("content", "")
 
-    # Resolve house_id for rent/terminate/offline from last_results
-    if intent in (Intent.RENT_HOUSE, Intent.TERMINATE_LEASE, Intent.OFFLINE_HOUSE) and not slots.house_id:
-        house_id = resolve_reference(user_input, state.last_results, ref_index)
-        if house_id:
-            slots = Slots(house_id=house_id, listing_platform=slots.listing_platform or "安居客")
+    tool_results = []
+    house_ids = []
 
-    # CHAT: no API
-    if intent == Intent.CHAT:
-        message = generate_reply(user_input, Slots(), [], 0, history, intent="chat")
-        append_turn(session_id, user_input, message, intent=intent.value, result_house_ids=[])
-        return {"session_id": session_id, "message": message, "houses": [], "tool_results": []}
+    if tool_calls:
+        # Step 2: Execute tool calls
+        messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
 
-    calls = plan_calls(intent, slots)
-    house_results, extra, tool_results = execute_calls(calls) if calls else ([], {}, [])
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            tool_name = func.get("name", "")
+            try:
+                args = json.loads(func.get("arguments", "{}"))
+            except json.JSONDecodeError:
+                args = {}
 
-    sort_by = slots.sort_by
-    sort_order = slots.sort_order
-    if not sort_by and intent == Intent.QUERY_HOUSE and slots.max_subway_dist:
-        sort_by = "subway_distance"
-        sort_order = sort_order or "asc"
+            tool_result = _execute_tool(tool_name, args)
+            tool_results.append({
+                "tool": tool_name,
+                "params": args,
+                "ok": tool_result is not None,
+                "result_summary": _summarize_result(tool_result),
+            })
 
-    processed, total = post_process(
-        house_results,
-        slots,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        max_houses=config.MAX_HOUSES,
-    )
+            # Add tool result to conversation
+            tool_result_str = json.dumps(tool_result, ensure_ascii=False, default=str) if tool_result else '{"error": "工具调用失败"}'
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id", ""),
+                "name": tool_name,
+                "content": tool_result_str[:3000],
+            })
 
-    set_last_results(session_id, processed)
-    if intent in (Intent.QUERY_HOUSE, Intent.FOLLOW_UP):
-        set_accumulated_filters(session_id, slots)
+            # Extract house IDs from results
+            house_ids.extend(_extract_house_ids_from_result(tool_result))
 
-    no_match = _no_match_from_tool_results(tool_results, house_results, total)
-    rent_ok = intent == Intent.RENT_HOUSE and slots.house_id and _rent_ok_from_tool_results(tool_results)
-    ask_more = "其他" in user_input or "都给" in user_input
-    single_match_phrase = total == 1 and ask_more and intent == Intent.FOLLOW_UP
+        # Step 3: Call LLM again with tool results to generate final response
+        result2 = call_llm(messages, max_tokens=1024, temperature=0.2)
+        content = result2.get("content", "")
 
-    message = generate_reply(
-        user_input,
-        slots,
-        processed,
-        total,
-        history,
-        intent=intent.value,
-        no_match=no_match,
-        single_match=single_match_phrase,
-        rent_ok=rent_ok,
-        listings=extra.get("listings"),
-        tool_results=tool_results,
-    )
+        # Handle nested tool calls (LLM might want to call more tools)
+        nested_calls = result2.get("tool_calls", [])
+        if nested_calls:
+            messages.append({"role": "assistant", "content": content, "tool_calls": nested_calls})
+            for tc in nested_calls:
+                func = tc.get("function", {})
+                tool_name = func.get("name", "")
+                try:
+                    args = json.loads(func.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    args = {}
+                tool_result = _execute_tool(tool_name, args)
+                tool_results.append({"tool": tool_name, "params": args, "ok": tool_result is not None})
+                tool_result_str = json.dumps(tool_result, ensure_ascii=False, default=str) if tool_result else '{"error": "失败"}'
+                messages.append({"role": "tool", "tool_call_id": tc.get("id", ""), "name": tool_name, "content": tool_result_str[:3000]})
+                house_ids.extend(_extract_house_ids_from_result(tool_result))
+            result3 = call_llm(messages, max_tokens=1024, temperature=0.2)
+            content = result3.get("content", "")
 
-    house_ids = _extract_house_ids(processed)
-    if intent == Intent.RENT_HOUSE and slots.house_id and slots.house_id not in house_ids:
-        house_ids = [slots.house_id]
+    # Fallback if LLM returned nothing
+    if not content:
+        content = "没有找到符合条件的房源。请告诉我您的具体需求（区域、户型、预算等），我来帮您查找。"
 
-    append_turn(
-        session_id,
-        user_input,
-        message,
-        intent=intent.value,
-        slots=slots.to_dict(),
-        result_house_ids=house_ids,
-    )
+    # Dedupe house_ids
+    seen = set()
+    unique_ids = []
+    for hid in house_ids:
+        if hid and hid not in seen:
+            seen.add(hid)
+            unique_ids.append(hid)
 
-    return {"session_id": session_id, "message": message, "houses": house_ids, "tool_results": tool_results}
+    append_turn(session_id, user_input, content, result_house_ids=unique_ids)
+
+    return {
+        "session_id": session_id,
+        "message": content,
+        "houses": unique_ids,
+        "tool_results": tool_results,
+    }
+
+
+def _execute_tool(name: str, args: Dict[str, Any]) -> Any:
+    """Execute a tool call against the simulation API."""
+    try:
+        if name == "get_houses_by_platform":
+            return _house_api.get_houses_by_platform(**args)
+        if name == "get_house_by_id":
+            return _house_api.get_house(args.get("house_id", ""))
+        if name == "get_house_listings":
+            return _house_api.get_house_listings(args.get("house_id", ""))
+        if name == "get_houses_nearby":
+            return _house_api.get_houses_nearby(
+                landmark_id=args.get("landmark_id", ""),
+                max_distance=args.get("max_distance", 2000),
+                listing_platform=args.get("listing_platform"),
+            )
+        if name == "get_houses_by_community":
+            return _house_api.get_houses_by_community(
+                community=args.get("community", ""),
+                listing_platform=args.get("listing_platform"),
+            )
+        if name == "rent_house":
+            ok, result = _house_api.rent_house(
+                house_id=args.get("house_id", ""),
+                listing_platform=args.get("listing_platform", "安居客"),
+            )
+            return result if ok else {"error": "租房失败", "detail": str(result)}
+        if name == "terminate_rental":
+            ok, result = _house_api.terminate_house(
+                house_id=args.get("house_id", ""),
+                listing_platform=args.get("listing_platform", "安居客"),
+            )
+            return result if ok else {"error": "退租失败", "detail": str(result)}
+        if name == "get_landmarks":
+            return _landmark_api.get_landmarks(
+                category=args.get("category"),
+                district=args.get("district"),
+            )
+        if name == "get_nearby_landmarks":
+            return _house_api.get_nearby_landmarks(
+                community=args.get("community", ""),
+                type_=args.get("type"),
+            )
+        logger.warning("Unknown tool: %s", name)
+        return None
+    except Exception as e:
+        logger.error("Tool %s failed: %s", name, e)
+        return {"error": str(e)}
+
+
+def _extract_house_ids_from_result(result: Any) -> List[str]:
+    """Extract house_id values from API results."""
+    ids = []
+    if not result:
+        return ids
+    if isinstance(result, dict):
+        if "house_id" in result:
+            ids.append(result["house_id"])
+        if "id" in result and str(result["id"]).startswith("HF"):
+            ids.append(result["id"])
+        if "items" in result:
+            for item in (result["items"] or []):
+                hid = item.get("house_id") or item.get("id")
+                if hid:
+                    ids.append(str(hid))
+        if "data" in result and isinstance(result["data"], dict):
+            hid = result["data"].get("house_id") or result["data"].get("id")
+            if hid:
+                ids.append(str(hid))
+    if isinstance(result, list):
+        for item in result:
+            if isinstance(item, dict):
+                hid = item.get("house_id") or item.get("id")
+                if hid:
+                    ids.append(str(hid))
+    return ids
+
+
+def _summarize_result(result: Any) -> str:
+    if result is None:
+        return "failed"
+    if isinstance(result, dict):
+        if "items" in result:
+            return f"total={result.get('total', 0)}"
+        if "error" in result:
+            return f"error: {result['error']}"
+        if "house_id" in result:
+            return f"house={result['house_id']}"
+    return "ok"
 
 
 def run_app():
-    import json
     import sys
     if len(sys.argv) >= 3:
         session_id = sys.argv[1]
