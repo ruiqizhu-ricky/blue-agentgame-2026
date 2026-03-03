@@ -10,7 +10,7 @@ from . import config
 from .api_client import HouseAPI, LandmarkAPI, set_api_user_id, clear_api_user_id
 from .llm_client import call_llm, clear_request_llm, set_request_llm
 from .tools import TOOLS, SYSTEM_PROMPT
-from .session_manager import ensure_session, get_history_for_prompt, append_turn
+from .session_manager import ensure_session, get_history_for_prompt, get_last_result_house_ids, append_turn
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,15 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
 def _handle_impl_core(session_id: str, user_input: str) -> Dict[str, Any]:
     state = ensure_session(session_id)
     history = get_history_for_prompt(session_id, max_turns=5)
+    last_house_ids = get_last_result_house_ids(session_id)
+
+    # Build system prompt with context (last result IDs for 这套/那套 resolution)
+    system_content = SYSTEM_PROMPT
+    if last_house_ids:
+        system_content += f"\n\n【上下文】上一轮返回的房源ID（按顺序）：{', '.join(last_house_ids)}。用户说「这套」「那套」「第一套」「便宜那套」时，用对应ID调用工具。"
 
     # Build messages: system + history + current user message
-    messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": system_content}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_input})
 
@@ -178,6 +184,13 @@ def _normalize_tool_args(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         ev = out.get("elevator")
         if ev is not None and isinstance(ev, str) and ev.lower() not in ("true", "false"):
             out["elevator"] = None
+        # sort_by: subway -> subway_distance
+        sb = out.get("sort_by")
+        if sb and isinstance(sb, str) and sb.lower() in ("subway", "subway_dist"):
+            out["sort_by"] = "subway_distance"
+        # 默认多取一些结果供筛选
+        if out.get("page_size") is None:
+            out["page_size"] = 50
     return out
 
 

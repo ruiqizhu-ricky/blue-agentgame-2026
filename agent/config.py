@@ -35,8 +35,8 @@ def _get(key: str, env_key: str, default, coerce=str):
         return coerce(v)
     return default
 
-SIMULATION_HOST = _get("simulation_host", "SIMULATION_HOST", "127.0.0.1")
-SIMULATION_PORT = _get("simulation_port", "SIMULATION_PORT", 8080, coerce=int)
+# 房源 API：默认 127.0.0.1:8080，平台可注入 SIMULATION_URL；config.json 可选 simulation_url
+BASE_URL = _get("simulation_url", "SIMULATION_URL", "http://127.0.0.1:8080").rstrip("/")
 USER_ID = _get("user_id", "USER_ID", "test_user")
 API_TIMEOUT = _get("api_timeout", "API_TIMEOUT", 2, coerce=int)
 MAX_HOUSES = _get("max_houses", "MAX_HOUSES", 5, coerce=int)
@@ -46,7 +46,6 @@ LLM_API_KEY = _get("llm_api_key", "LLM_API_KEY", "")
 LLM_MODEL = _get("llm_model", "LLM_MODEL", "qwen3-32b")
 SERVER_PORT = _get("server_port", "PORT", 8000, coerce=int)
 
-BASE_URL = f"http://{SIMULATION_HOST}:{SIMULATION_PORT}"
 HEADERS_WITH_USER = {"X-User-ID": USER_ID}
 HEADERS_NO_USER = {}
 

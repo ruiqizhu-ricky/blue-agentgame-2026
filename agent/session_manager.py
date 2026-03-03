@@ -65,3 +65,16 @@ def get_history_for_prompt(session_id: str, max_turns: int = 6) -> List[Dict[str
         return []
     msgs = state.history[- (max_turns * 2) :]
     return [{"role": m["role"], "content": m["content"]} for m in msgs]
+
+
+def get_last_result_house_ids(session_id: str) -> List[str]:
+    """上一轮返回的房源ID列表，用于指代消解（这套/那套/第一套等）。"""
+    state = _sessions.get(session_id)
+    if not state or not state.history:
+        return []
+    for m in reversed(state.history):
+        if m.get("role") == "assistant" and isinstance(m.get("meta"), dict):
+            ids = m["meta"].get("result_house_ids")
+            if ids:
+                return ids
+    return []

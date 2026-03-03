@@ -1,6 +1,4 @@
 {
-  "simulation_host": "127.0.0.1",
-  "simulation_port": 8080,
   "user_id": "test_user",
   "api_timeout": 5,
   "max_houses": 5,

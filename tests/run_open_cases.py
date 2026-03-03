@@ -1,6 +1,6 @@
 """
 Run open test cases: call agent handle() for each round and check message_contains + expectedHouses.
-Requires simulation API (set SIMULATION_HOST, SIMULATION_PORT, USER_ID). Optional: LLM_API_BASE for real LLM.
+Requires simulation API (set SIMULATION_URL, USER_ID). Optional: LLM_API_BASE for real LLM.
 """
 import json
 import sys
