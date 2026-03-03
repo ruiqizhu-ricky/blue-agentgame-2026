@@ -1,5 +1,5 @@
 """
-Run open cases with mocked simulation API (no real server needed).
+Run open cases with mocked simulation API and LLM (no real server needed).
 """
 import json
 import sys
@@ -13,6 +13,50 @@ import agent.session_manager as sm
 sm._sessions.clear()
 
 from agent.main import handle
+
+
+# Predefined (tool_calls, final_content) for each round; mock call_llm uses these
+_MOCK_LLM_RESPONSES = [
+    # Case 1: 东城精装两居 5000以内 500米地铁 -> 无结果
+    (
+        [{"id": "tc1", "function": {"name": "get_houses_by_platform", "arguments": '{"district":"东城","decoration":"精装","bedrooms":"2","max_price":5000,"max_subway_dist":500}'}}],
+        "没有符合您要求的房源。",
+    ),
+    # Case 2 round 1: 西城离地铁近一居室
+    (
+        [{"id": "tc2", "function": {"name": "get_houses_by_platform", "arguments": '{"district":"西城","bedrooms":"1","max_subway_dist":800,"sort_by":"subway_distance","sort_order":"asc"}'}}],
+        "西城区1居室，800米地铁，subway_distance asc排序：HF_13 某小区 西城 40㎡ 4500元 精装 朝南 某站600米 通勤30分钟",
+    ),
+    # Case 2 round 2: 还有其他的吗
+    (
+        [{"id": "tc3", "function": {"name": "get_houses_by_platform", "arguments": '{"district":"西城","bedrooms":"1","max_subway_dist":800}'}}],
+        "没有其他的了，只有这一套。HF_13 某小区 西城 40㎡ 4500元",
+    ),
+    # Case 3 round 1: 海淀离地铁近两居
+    (
+        [{"id": "tc4", "function": {"name": "get_houses_by_platform", "arguments": '{"district":"海淀","bedrooms":"2","max_subway_dist":800,"sort_by":"subway_distance","sort_order":"asc"}'}}],
+        "海淀区2居室，800米地铁，subway_distance asc：HF_906 HF_1586 HF_1876 HF_706 HF_33 共5套",
+    ),
+    # Case 3 round 2: 就租最近的那套
+    (
+        [{"id": "tc5", "function": {"name": "rent_house", "arguments": '{"house_id":"HF_906","listing_platform":"安居客"}'}}],
+        "好的，已为您办理HF_906的租赁。",
+    ),
+]
+_mock_llm_idx = [0]
+
+
+def _mock_call_llm(messages, *, temperature=0.2, max_tokens=1024, tools=None):
+    """Mock LLM: first call returns tool_calls, second returns content."""
+    has_tool_role = any(m.get("role") == "tool" for m in messages)
+    idx = _mock_llm_idx[0]
+    if idx >= len(_MOCK_LLM_RESPONSES):
+        return {"content": "没有", "tool_calls": []}
+    tool_calls, content = _MOCK_LLM_RESPONSES[idx]
+    if has_tool_role:
+        _mock_llm_idx[0] += 1
+        return {"content": content, "tool_calls": []}
+    return {"content": "", "tool_calls": tool_calls}
 
 
 def _mock_by_platform(**params):
@@ -60,10 +104,11 @@ def test_open_cases_mock():
     mock_house.terminate_house = lambda house_id, listing_platform: (True, {})
     mock_house.offline_house = lambda house_id, listing_platform: (True, {})
 
-    with patch("agent.api_executor._house", mock_house):
+    with patch("agent.main._house_api", mock_house), patch("agent.main.call_llm", side_effect=_mock_call_llm):
         cases_path = Path(__file__).parent / "open_cases.json"
         with open(cases_path, "r", encoding="utf-8") as f:
             cases = json.load(f)
+        _mock_llm_idx[0] = 0
         for case in cases:
             sm._sessions.clear()
             for r in case["rounds"]:

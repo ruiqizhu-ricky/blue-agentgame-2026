@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, List
 
 from . import config
-from .api_client import HouseAPI, LandmarkAPI
+from .api_client import HouseAPI, LandmarkAPI, set_api_user_id, clear_api_user_id
 from .llm_client import call_llm, clear_request_llm, set_request_llm
 from .tools import TOOLS, SYSTEM_PROMPT
 from .session_manager import ensure_session, get_history_for_prompt, append_turn
@@ -28,7 +28,25 @@ def handle(session_id: str, user_input: str, model_ip: str = "") -> Dict[str, An
             clear_request_llm()
 
 
+def _extract_user_id(session_id: str) -> str:
+    """Extract user_id from eval session_id (eval_z00925877_EV-01_xxx -> z00925877)."""
+    if session_id.startswith("eval_") and "_EV-" in session_id:
+        part = session_id.split("_EV-")[0]
+        if part.startswith("eval_"):
+            return part[5:]  # after "eval_"
+    return config.USER_ID
+
+
 def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
+    user_id = _extract_user_id(session_id)
+    set_api_user_id(user_id)
+    try:
+        return _handle_impl_core(session_id, user_input)
+    finally:
+        clear_api_user_id()
+
+
+def _handle_impl_core(session_id: str, user_input: str) -> Dict[str, Any]:
     state = ensure_session(session_id)
     history = get_history_for_prompt(session_id, max_turns=5)
 
@@ -122,9 +140,51 @@ def _handle_impl(session_id: str, user_input: str) -> Dict[str, Any]:
     }
 
 
+def _normalize_tool_args(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize LLM tool args to avoid ValueError (e.g. max_subway_dist='地铁')."""
+    out = dict(args)
+    if name == "get_houses_by_platform":
+        # max_subway_dist: "地铁"/"近地铁" -> 800, "地铁可达" -> 1000, invalid -> 800
+        v = out.get("max_subway_dist")
+        if v is not None:
+            if isinstance(v, int) and v > 0:
+                pass
+            elif isinstance(v, str):
+                s = str(v).strip()
+                if "可达" in s or s == "1000":
+                    out["max_subway_dist"] = 1000
+                elif "近" in s or "地铁" in s or s == "800" or not s.isdigit():
+                    out["max_subway_dist"] = 800
+                else:
+                    try:
+                        out["max_subway_dist"] = int(float(s))
+                    except (ValueError, TypeError):
+                        out["max_subway_dist"] = 800
+            else:
+                try:
+                    out["max_subway_dist"] = int(v)
+                except (ValueError, TypeError):
+                    out["max_subway_dist"] = 800
+        # Coerce numeric params; invalid -> None (omit from API)
+        for key in ("min_price", "max_price", "min_area", "max_area", "commute_to_xierqi_max"):
+            v = out.get(key)
+            if v is None:
+                continue
+            try:
+                out[key] = int(float(v)) if v != "" else None
+            except (ValueError, TypeError):
+                out[key] = None
+        # elevator: bool or "true"/"false" string
+        ev = out.get("elevator")
+        if ev is not None and isinstance(ev, str) and ev.lower() not in ("true", "false"):
+            out["elevator"] = None
+    return out
+
+
 def _execute_tool(name: str, args: Dict[str, Any]) -> Any:
     """Execute a tool call against the simulation API."""
     try:
+        args = _normalize_tool_args(name, args)
         if name == "get_houses_by_platform":
             return _house_api.get_houses_by_platform(**args)
         if name == "get_house_by_id":
